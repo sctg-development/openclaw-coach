@@ -1,0 +1,30 @@
+{
+  "id": "coach",
+  "name": "AI Coach",
+  "description": "Endurance coaching skill backed by a Garmin Connect training-signal digest tool (via garmin-cli's gc CLI).",
+  "requiresPlugins": [],
+  "skills": ["skills/coach"],
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["coach_garmin_digest"]
+  },
+  "toolMetadata": {
+    "coach_garmin_digest": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "gcBinary": {
+        "type": "string",
+        "description": "Path to the garmin-cli `gc` binary. Defaults to \"gc\" (resolved from PATH)."
+      }
+    }
+  }
+}
