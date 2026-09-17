@@ -6,12 +6,16 @@ built on top of [garmin-cli](https://github.com/sctg-development/garmin-cli)
 
 It ships:
 
-- A `coach` skill with a coaching workflow and safety framing (see
-  [`skills/coach/SKILL.md`](skills/coach/SKILL.md)).
-- One tool, `coach_garmin_digest`, that aggregates the handful of `gc`
-  commands a coaching check-in actually needs (recent activities, training
-  readiness/status, body battery, sleep, weight trend, race predictions)
-  into a single call.
+- A `coach` skill with real coaching methodology (HRV/readiness
+  interpretation, training-zone recalibration, grade-adjusted pace and
+  cardiac-drift analysis, trail/vertical periodization) and safety framing
+  (see [`skills/coach/SKILL.md`](skills/coach/SKILL.md)).
+- `coach_garmin_digest`, aggregating the handful of `gc` commands a routine
+  check-in needs (recent activities, training readiness/status, HRV, body
+  battery, sleep, weight trend, race predictions) into one call.
+- `coach_activity_deep_dive`, a fine-grained bundle for one activity:
+  elevation/grade-segmented splits, HR zones, and weather — the basis for
+  grade-adjusted pace and cardiac-drift analysis.
 
 It deliberately does **not** ship its own scheduler or a bundled athlete
 profile. Proactive check-ins use OpenClaw's built-in
@@ -33,12 +37,26 @@ this repo: it's personal health data, and this plugin is public.
 ## Install
 
 ```bash
-openclaw plugins install npm:@sctg-development/openclaw-coach
+openclaw plugins install npm:@sctg/openclaw-coach
 ```
 
 Or as a git submodule alongside a local OpenClaw checkout, matching how this
 was originally built — see the parent deployment's plugin loading setup for
 the exact wiring.
+
+## Publishing
+
+`.github/workflows/publish.yml` publishes to npm when a GitHub Release is
+published (or manually via workflow dispatch). It expects an `NPM_TOKEN`
+repository secret with publish rights to the `@sctg` npm org:
+
+```bash
+gh secret set NPM_TOKEN --repo sctg-development/openclaw-coach
+```
+
+The workflow checks that `package.json`'s version matches the release tag
+(`vX.Y.Z`) before building and publishing, so bump the version and tag
+together.
 
 ## Set up
 

@@ -1,5 +1,5 @@
 {
-  "name": "@sctg-development/openclaw-coach",
+  "name": "@sctg/openclaw-coach",
   "version": "0.1.0",
   "description": "AI endurance coach plugin for OpenClaw: aggregates Garmin Connect training signals via garmin-cli into one digest tool, backing a coaching skill.",
   "type": "module",
@@ -9,14 +9,31 @@
     "type": "git",
     "url": "git+https://github.com/sctg-development/openclaw-coach.git"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "skills",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
   "dependencies": {
     "typebox": "1.3.17"
+  },
+  "devDependencies": {
+    "openclaw": ">=2026.8.2",
+    "typescript": "^5.9.0"
   },
   "peerDependencies": {
     "openclaw": ">=2026.8.2"
   },
   "openclaw": {
-    "extensions": ["./index.ts"],
+    "extensions": ["./dist/index.js"],
     "compat": {
       "pluginApi": ">=2026.8.2",
       "minGatewayVersion": "2026.8.2"
@@ -25,5 +42,8 @@
       "openclawVersion": "2026.8.2",
       "pluginSdkVersion": "2026.8.2"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
