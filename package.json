@@ -1,7 +1,7 @@
 {
   "name": "@sctg/openclaw-coach",
-  "version": "0.1.0",
-  "description": "AI endurance coach plugin for OpenClaw: aggregates Garmin Connect training signals via garmin-cli into one digest tool, backing a coaching skill.",
+  "version": "2.0.0",
+  "description": "AI endurance and recovery coach plugin for OpenClaw: documented physiological models (HRV baseline, recovery, sleep, training load, early warning) computed on Garmin Connect data via garmin-cli, with a coaching skill.",
   "type": "module",
   "license": "MIT",
   "author": "Ronan LE MEILLAT",
@@ -14,12 +14,15 @@
   "files": [
     "dist",
     "skills",
+    "docs",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "node --test \"test/*.test.ts\"",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

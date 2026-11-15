@@ -1,38 +1,33 @@
 # OpenClaw Coach
 
-An AI endurance coach plugin for [OpenClaw](https://github.com/openclaw/openclaw),
-built on top of [garmin-cli](https://github.com/sctg-development/garmin-cli)
-(the `gc` CLI for Garmin Connect).
+An endurance and recovery coach plugin for [OpenClaw](https://github.com/openclaw/openclaw), built on
+[garmin-cli](https://github.com/sctg-development/garmin-cli) (the `gc` CLI for Garmin Connect).
 
-It ships:
+Version 2 is a rewrite. Version 1 handed raw Garmin payloads to the model; version 2 **computes documented
+physiological models in code** and gives the model compact, sourced results to interpret:
 
-- A `coach` skill with real coaching methodology (HRV/readiness
-  interpretation, training-zone recalibration, grade-adjusted pace and
-  cardiac-drift analysis, trail/vertical periodization) and safety framing
-  (see [`skills/coach/SKILL.md`](skills/coach/SKILL.md)).
-- `coach_garmin_digest`, aggregating the handful of `gc` commands a routine
-  check-in needs (recent activities, training readiness/status, HRV, body
-  battery, sleep, weight trend, race predictions) into one call.
-- `coach_activity_deep_dive`, a fine-grained bundle for one activity:
-  elevation/grade-segmented splits, HR zones, and weather — the basis for
-  grade-adjusted pace and cardiac-drift analysis.
+- **HRV** against the athlete's own baseline (ln rMSSD, 7-day trend, normal range, stability);
+- a **recovery index** and its components (HRV, resting heart rate, sleep, respiratory rate, skin temperature);
+- **early-warning** flags when several signals move together;
+- **sleep** sufficiency, running debt and regularity;
+- **training load** (Banister TRIMP, fitness, fatigue, form, monotony, intensity distribution) with
+  **projection of a plan**;
+- a daily **training ceiling** (rest / easy / moderate / hard) with the rules behind it;
+- activity analysis (grade-adjusted pace, aerobic decoupling), zones and paces, strength summaries,
+  a habit journal with association statistics, long-term health markers.
 
-It deliberately does **not** ship its own scheduler or a bundled athlete
-profile. Proactive check-ins use OpenClaw's built-in
-[Automations](https://docs.openclaw.ai/automation/cron-jobs) (`openclaw
-automations create ...`), and the athlete's actual profile — bio, personal
-records, goal race, injury/medical history, current constraints — lives in a
-workspace `ATHLETE.md` file you maintain yourself, the same way OpenClaw
-already handles `AGENTS.md`/`SOUL.md`/`USER.md`. That file is never part of
-this repo: it's personal health data, and this plugin is public.
+Every formula, constant, threshold, level of evidence and limit is in
+[`docs/SCIENCE.md`](docs/SCIENCE.md) (in French, written for review by sport-science and medical teams,
+with a verified bibliography and LLM recommendations). The coaching behaviour and safety rules are in
+[`skills/coach/SKILL.md`](skills/coach/SKILL.md).
+
+This is a coaching aid for a healthy training adult. It is not a medical device and makes no diagnosis.
 
 ## Requirements
 
 - An OpenClaw Gateway (2026.8.2+).
-- [`gc`](https://github.com/sctg-development/garmin-cli) installed and
-  authenticated (`gc login ...`) in the same environment the Gateway runs
-  in. The bundled [`garmin`](https://github.com/openclaw/openclaw/tree/main/skills/garmin)
-  skill already documents this.
+- [`gc`](https://github.com/sctg-development/garmin-cli) **0.4.0 or later** (for `gc daily`), installed
+  and authenticated (`gc login ...`) in the environment the Gateway runs in.
 
 ## Install
 
@@ -40,65 +35,97 @@ this repo: it's personal health data, and this plugin is public.
 openclaw plugins install npm:@sctg/openclaw-coach
 ```
 
-Or as a git submodule alongside a local OpenClaw checkout, matching how this
-was originally built — see the parent deployment's plugin loading setup for
-the exact wiring.
-
-## Publishing
-
-`.github/workflows/publish.yml` publishes to npm when a GitHub Release is
-published (or manually via workflow dispatch). It expects an `NPM_TOKEN`
-repository secret with publish rights to the `@sctg` npm org:
-
-```bash
-gh secret set NPM_TOKEN --repo sctg-development/openclaw-coach
-```
-
-The workflow checks that `package.json`'s version matches the release tag
-(`vX.Y.Z`) before building and publishing, so bump the version and tag
-together.
-
 ## Set up
 
-1. Confirm `gc status` succeeds in the Gateway's environment.
-2. Create `ATHLETE.md` in your OpenClaw workspace from the template in
-   [`skills/coach/SKILL.md`](skills/coach/SKILL.md#athletemd-template), or
-   just ask the coach to create it with you.
-3. Optionally, set up a proactive check-in — see
-   [the skill's "Proactive check-ins" section](skills/coach/SKILL.md#proactive-check-ins)
-   for the `openclaw automations create` recipe.
-4. Ask the coach for a status update, a plan, or anything else — it reads
-   `ATHLETE.md` and pulls Garmin data as needed.
+1. Check that `gc status` succeeds in the Gateway's environment.
+2. Configure the athlete's anchors (see Configuration). At least `timezone`, `sex` and a measured `hrMax`.
+3. Ask the coach to run `coach_data_status` with `sync: true`: it fetches 90 days of recovery signals and
+   180 days of activities (about 25 Garmin requests), and says what is missing.
+4. Create `ATHLETE.md` in the workspace from the template in the skill, or ask the coach to do it with you.
+5. Optionally schedule check-ins with OpenClaw Automations (recipes in the skill).
+
+Baselines need history: HRV and recovery are `calibrating` until 14 nights exist, and the load model
+needs about a month to be usable and three months to be stable.
+
+## Tools
+
+| Tool | Purpose | Writes |
+|---|---|---|
+| `coach_daily_briefing` | Ceiling for the day, recovery, HRV, sleep, early warning, load, yesterday's sessions | local store |
+| `coach_trends` | Weekly aggregates, load indicators, long-term health markers | local store |
+| `coach_training_load` | Load model and projection of a plan | local store |
+| `coach_activity_deep_dive` | One activity: laps, grade-adjusted pace, decoupling, heat | — |
+| `coach_zones_and_paces` | Heart-rate zones, VDOT paces, race equivalences | — |
+| `coach_strength_analysis` | One strength session: volume, estimated 1RM | — |
+| `coach_journal_log` | Subjective check-in, symptoms, habits | local journal |
+| `coach_journal_insights` | Associations between habits and the following night | — |
+| `coach_workout_push` | Create a workout in Garmin Connect (preview, then explicit confirmation) | **Garmin Connect** |
+| `coach_data_status` | Coverage, sync errors, anchors in use | local store |
+
+Version 1's `coach_garmin_digest` is gone: replace it with `coach_daily_briefing` in existing automations.
 
 ## Configuration
 
-| Key         | Type   | Default | Description                                     |
-| ----------- | ------ | ------- | ------------------------------------------------ |
-| `gcBinary`  | string | `"gc"`  | Path to the garmin-cli binary, if not on `PATH`. |
+| Key | Default | Description |
+|---|---|---|
+| `gcBinary` | `gc` | Path to the garmin-cli binary. |
+| `timezone` | Gateway timezone | IANA timezone of the athlete (day boundaries). |
+| `dataDir` | `~/.openclaw/coach` | Local store directory. |
+| `sex` | — | `male` or `female`: training-load coefficients. |
+| `birthYear` | — | Only used to estimate maximum heart rate when none is measured. |
+| `hrMax` | observed, else age formula | Measured maximum heart rate (bpm). Strongly recommended. |
+| `hrRest` | 60-day median | Resting heart rate (bpm). |
+| `lthr` | Garmin's estimate | Lactate-threshold heart rate (bpm). |
+| `sleepNeedHours` | `8` | Used when Garmin reports no personal sleep need. |
+| `hrZoneFloorsPctMax` | `[50,60,70,80,90]` | Lower bound of zones 1-5, in percent of maximum heart rate. |
+| `historyDays` | `90` | Days of recovery history kept in sync. |
+| `loadHistoryDays` | `180` | Days of activities used by the load model. |
+| `retentionDays` | `730` | Older stored data is deleted. |
+| `cacheMinutes` | `15` | Minimum delay between two fetches of recent days. |
+| `allowWorkoutPush` | `false` | Allow `coach_workout_push` to write to Garmin Connect. |
 
 ```json5
 {
   plugins: {
     entries: {
       coach: {
-        config: { gcBinary: "/usr/local/bin/gc" },
+        config: { timezone: "Europe/Paris", sex: "male", birthYear: 1975, hrMax: 182 },
       },
     },
   },
 }
 ```
 
-## Why so little custom code?
+## Data and privacy
 
-Most of what an "AI coach" needs is already solved by OpenClaw itself: full
-Garmin data access (the `garmin` skill), scheduling (Automations), and
-durable per-athlete context (workspace files). This plugin's job is the one
-thing those don't cover well on their own — collapsing several Garmin calls
-into one coaching-shaped digest — plus the coaching methodology and safety
-framing as a skill. See [`skills/coach/SKILL.md`](skills/coach/SKILL.md) for
-the actual coaching logic; it lives in prose, not code, because a coach's
-judgment calls (how to weigh a good VO2max trend against a still-healing
-fracture, for instance) belong in reasoning, not a rigid algorithm.
+The plugin keeps a single JSON file (`coach-store.json`, owner-only permissions) with nightly aggregates,
+the activity list and the journal: no intraday series, no GPS tracks, no credentials. Delete the file to
+erase everything. Tool results, the journal and `ATHLETE.md` are sent to whichever LLM provider the
+Gateway uses: that is health data, so choose the provider accordingly (see `docs/SCIENCE.md`, section 10).
+
+## Development
+
+```bash
+npm ci
+npm run typecheck
+npm test          # 38 tests, synthetic data, no Garmin access needed
+npm run build
+```
+
+The models are pure functions in `src/science/`; `src/tools.ts` takes its `gc` runner and clock as
+arguments, so tests run against a fake `gc`. When a formula, constant or threshold changes, bump the
+model's `version` and update `docs/SCIENCE.md` in the same commit.
+
+To check which fields your watch and account return, without exposing any value:
+
+```bash
+gc daily yesterday --keys
+```
+
+## Publishing
+
+`.github/workflows/publish.yml` publishes to npm when a GitHub Release is published. It checks that
+`package.json`'s version matches the release tag (`vX.Y.Z`).
 
 ## License
 

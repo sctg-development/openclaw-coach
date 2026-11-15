@@ -1,0 +1,673 @@
+/**
+ * Tool handlers. Each one loads the local store, syncs it with Garmin when
+ * asked, runs the models and returns a compact JSON result. Handlers take their
+ * dependencies as arguments so that tests can inject a fake `gc` and clock.
+ */
+
+import type { CoachConfig } from "./config.ts";
+import { addDays, dateRange, isIsoDate, todayIn, weekStart } from "./dates.ts";
+import type { GcRunner } from "./garmin/gc.ts";
+import { garminDaySignals, normalizeActivity, normalizeSplits } from "./garmin/normalize.ts";
+import { resolveProfile } from "./profile.ts";
+import { habitAssociations } from "./science/associations.ts";
+import { healthspanMarkers } from "./science/healthspan.ts";
+import { analyzeHrv, lnRmssd } from "./science/hrv.ts";
+import {
+  analyzeLoad,
+  dailyLoads,
+  fitnessFatigue,
+  intensityDistribution,
+  plannedSessionLoad,
+  projectLoads,
+  sessionLoad,
+  type DailyLoad,
+} from "./science/load.ts";
+import {
+  ACTIVITY_ALGORITHM,
+  ZONES_ALGORITHM,
+  aerobicDecoupling,
+  gradeAdjustedSpeed,
+  predictTimeFromVdot,
+  riegel,
+  trainingPaces,
+  vdot,
+  zoneTables,
+} from "./science/performance.ts";
+import { decideReadiness } from "./science/readiness.ts";
+import { analyzeRecovery, analyzeWarning } from "./science/recovery.ts";
+import { analyzeSleep } from "./science/sleep.ts";
+import { isNum, mean, round, roundOrNull, sum, valid } from "./science/stats.ts";
+import { STRENGTH_ALGORITHM, parseExerciseSets, summarizeStrength } from "./science/strength.ts";
+import { activitiesFrom, daysBetweenDates, loadStore, saveStore, type StoreData } from "./store.ts";
+import { coverage, syncStore, type SyncReport } from "./sync.ts";
+import type { Activity, DayRecord, JournalEntry, Profile } from "./types.ts";
+
+export type Deps = { config: CoachConfig; gc: GcRunner; now?: () => Date };
+
+export class ToolInputError extends Error {}
+
+/** One store operation at a time: two tool calls must not interleave a load and a save. */
+let queue: Promise<unknown> = Promise.resolve();
+function exclusive<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task, task);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+type Context = {
+  today: string;
+  date: string;
+  store: StoreData;
+  sync: SyncReport | null;
+  days: DayRecord[];
+  activities: Activity[];
+  loads: DailyLoad[];
+  profile: Profile;
+};
+
+function resolveDate(value: unknown, today: string): string {
+  if (value === undefined || value === null || value === "today") return today;
+  if (value === "yesterday") return addDays(today, -1);
+  if (!isIsoDate(value)) throw new ToolInputError("date must be YYYY-MM-DD, 'today' or 'yesterday'.");
+  if (value > today) throw new ToolInputError("date is in the future.");
+  return value;
+}
+
+async function loadContext(deps: Deps, options: { date?: unknown; sync?: boolean }): Promise<Context> {
+  const { config } = deps;
+  const now = deps.now?.() ?? new Date();
+  const today = todayIn(config.timezone, now);
+  const date = resolveDate(options.date, today);
+  return exclusive(async () => {
+    const store = await loadStore(config.dataDir);
+    let sync: SyncReport | null = null;
+    if (options.sync !== false) {
+      sync = await syncStore(store, deps.gc, config, today, now);
+      await saveStore(config.dataDir, store);
+    }
+    const days = daysBetweenDates(store, dateRange(addDays(date, -(config.historyDays - 1)), date));
+    // The load series starts where the activity list is known to be complete: days
+    // before that are unknown, not rest days.
+    const wanted = addDays(date, -(config.loadHistoryDays - 1));
+    const loadStart = store.activitiesFrom && store.activitiesFrom > wanted ? store.activitiesFrom : wanted;
+    const activities = activitiesFrom(store, loadStart, date);
+    const profile = resolveProfile(config, days, activities, store.lthr?.value ?? null, date);
+    const loads = loadStart <= date && store.activitiesFrom ? dailyLoads(activities, profile, loadStart, date) : [];
+    return { today, date, store, sync, days, activities, loads, profile };
+  });
+}
+
+function profileSummary(profile: Profile) {
+  return {
+    sex: profile.sex,
+    hrMax: profile.hrMax,
+    hrMaxSource: profile.hrMaxSource,
+    hrRest: profile.hrRest,
+    hrRestSource: profile.hrRestSource,
+    lthr: profile.lthr,
+    lthrSource: profile.lthrSource,
+    sleepNeedH: round(profile.sleepNeedS / 3600, 1),
+    sleepNeedSource: profile.sleepNeedSource,
+  };
+}
+
+function paceText(speedMs: number | null): string | null {
+  if (!isNum(speedMs) || speedMs <= 0) return null;
+  const seconds = Math.round(1000 / speedMs);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}/km`;
+}
+
+function clock(seconds: number): string {
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function activityLine(activity: Activity, profile: Profile) {
+  const load = sessionLoad(activity, profile);
+  return {
+    id: activity.id,
+    date: activity.date,
+    start: activity.startLocal?.slice(11, 16) ?? null,
+    type: activity.type,
+    name: activity.name,
+    durationMin: roundOrNull(isNum(activity.durationS) ? activity.durationS / 60 : null, 0),
+    distanceKm: roundOrNull(isNum(activity.distanceM) ? activity.distanceM / 1000 : null, 2),
+    elevGainM: roundOrNull(activity.elevGainM, 0),
+    avgHr: activity.avgHr,
+    maxHr: activity.maxHr,
+    pace: paceText(activity.avgSpeedMs),
+    gradeAdjustedPace: paceText(activity.gapSpeedMs),
+    load: load.trimp,
+    loadMethod: load.method,
+    garminLoad: load.garmin,
+    aerobicTE: activity.aerobicTE,
+    anaerobicTE: activity.anaerobicTE,
+  };
+}
+
+function syncSummary(context: Context) {
+  return {
+    assessedDate: context.date,
+    isToday: context.date === context.today,
+    sync: context.sync ? { fetchedDays: context.sync.fetchedDays, fetchedActivities: context.sync.fetchedActivities, errors: context.sync.errors } : "not requested",
+    dayErrors: context.days[context.days.length - 1]?.errors ?? {},
+  };
+}
+
+// --- coach_daily_briefing -------------------------------------------------------------------------
+
+export async function dailyBriefing(deps: Deps, params: { date?: unknown; sync?: boolean }) {
+  const context = await loadContext(deps, params);
+  const { days, activities, loads, profile, date, store } = context;
+  const today = days[days.length - 1];
+  const journal = store.journal[date] ?? null;
+
+  const hrv = analyzeHrv(days);
+  const sleep = analyzeSleep(days, profile);
+  const recovery = analyzeRecovery(days, profile);
+  const warning = analyzeWarning(days);
+  const load = analyzeLoad(loads, activities, profile);
+  const readiness = decideReadiness({ hrv, recovery, warning, sleep, load, journal });
+
+  const [readinessResult, statusResult] = await Promise.all([
+    deps.gc(["metrics", "training-readiness", date]),
+    deps.gc(["metrics", "training-status", date]),
+  ]);
+  const garmin = garminDaySignals(readinessResult.ok ? readinessResult.data : null, statusResult.ok ? statusResult.data : null);
+
+  const yesterday = addDays(date, -1);
+  return {
+    date,
+    data: { ...syncSummary(context), coverage: coverage(store, date, deps.config.historyDays) },
+    readiness,
+    recovery: { status: recovery.status, score: recovery.score, band: recovery.band, components: recovery.components, coverage: recovery.coverage, notes: recovery.notes, algorithm: recovery.algorithm },
+    signals: recovery.deviations,
+    hrv,
+    sleep,
+    earlyWarning: warning,
+    load: { ...load, intensity28: load.intensity28 },
+    garmin: {
+      ...garmin,
+      hrvStatus: today?.hrv?.status ?? null,
+      bodyBattery: today?.bodyBattery ?? null,
+      stress: today?.stress ? { avg: today.stress.avg, max: today.stress.max } : null,
+      note: "Garmin's own scores, reported as such: proprietary models, shown for comparison.",
+    },
+    activities: {
+      today: activities.filter((activity) => activity.date === date).map((activity) => activityLine(activity, profile)),
+      yesterday: activities.filter((activity) => activity.date === yesterday).map((activity) => activityLine(activity, profile)),
+    },
+    journal,
+    profile: profileSummary(profile),
+  };
+}
+
+// --- coach_trends ---------------------------------------------------------------------------------
+
+export async function trends(deps: Deps, params: { days?: number; includeDaily?: boolean; sync?: boolean }) {
+  const context = await loadContext(deps, { sync: params.sync });
+  const { days, activities, loads, profile, date } = context;
+  const span = Math.min(Math.max(Math.round(params.days ?? 28), 14), deps.config.historyDays);
+  const window = days.slice(-span);
+  const curve = fitnessFatigue(loads);
+  const curveByDate = new Map(curve.map((point) => [point.date, point]));
+
+  const weeks = new Map<string, { days: DayRecord[]; activities: Activity[] }>();
+  for (const day of window) {
+    const key = weekStart(day.date);
+    if (!weeks.has(key)) weeks.set(key, { days: [], activities: [] });
+    weeks.get(key)?.days.push(day);
+  }
+  for (const activity of activities) weeks.get(weekStart(activity.date))?.activities.push(activity);
+
+  const weekly = [...weeks.entries()].map(([start, week]) => {
+    const inWindow = week.activities.filter((activity) => activity.date >= window[0].date);
+    const ln = valid(week.days.map(lnRmssd));
+    const lastDay = week.days[week.days.length - 1].date;
+    return {
+      weekStart: start,
+      daysInWindow: week.days.length,
+      hrvMs: ln.length ? round(Math.exp(mean(ln) as number), 0) : null,
+      restingHr: roundOrNull(mean(valid(week.days.map((day) => day.restingHr))), 0),
+      sleepH: roundOrNull(mean(valid(week.days.map((day) => (isNum(day.sleep?.durationS) ? day.sleep.durationS / 3600 : null)))), 2),
+      respiration: roundOrNull(mean(valid(week.days.map((day) => day.respiration?.sleepAvg))), 1),
+      load: round(sum(inWindow.map((activity) => sessionLoad(activity, profile).trimp ?? 0)), 0),
+      sessions: inWindow.length,
+      hours: round(sum(inWindow.map((activity) => activity.durationS ?? 0)) / 3600, 1),
+      distanceKm: round(sum(inWindow.map((activity) => activity.distanceM ?? 0)) / 1000, 1),
+      elevGainM: round(sum(inWindow.map((activity) => activity.elevGainM ?? 0)), 0),
+      fitnessAtEnd: curveByDate.get(lastDay)?.ctl ?? null,
+      formAtEnd: curveByDate.get(lastDay)?.tsb ?? null,
+      intensity: intensityDistribution(inWindow),
+    };
+  });
+
+  const result: Record<string, unknown> = {
+    date,
+    windowDays: span,
+    data: syncSummary(context),
+    weekly,
+    hrv: analyzeHrv(days),
+    sleep: analyzeSleep(days, profile),
+    load: analyzeLoad(loads, activities, profile),
+    healthspan: healthspanMarkers(days, activities, profile),
+    profile: profileSummary(profile),
+  };
+  if (params.includeDaily) {
+    result.daily = window.map((day) => ({
+      date: day.date,
+      hrvMs: day.hrv?.lastNightAvgMs ?? null,
+      restingHr: day.restingHr,
+      sleepH: roundOrNull(isNum(day.sleep?.durationS) ? day.sleep.durationS / 3600 : null, 1),
+      respiration: day.respiration?.sleepAvg ?? null,
+      spo2: day.spo2?.sleepAvg ?? null,
+      skinTempC: day.skinTempDeviationC,
+      load: curveByDate.get(day.date)?.load ?? null,
+      fitness: curveByDate.get(day.date)?.ctl ?? null,
+      fatigue: curveByDate.get(day.date)?.atl ?? null,
+      form: curveByDate.get(day.date)?.tsb ?? null,
+    }));
+  }
+  return result;
+}
+
+// --- coach_training_load --------------------------------------------------------------------------
+
+export type PlannedSession = { date: string; load?: number; durationMin?: number; zone?: number };
+
+export async function trainingLoad(deps: Deps, params: { plan?: PlannedSession[]; sync?: boolean }) {
+  const context = await loadContext(deps, { sync: params.sync });
+  const { activities, loads, profile, date } = context;
+  const analysis = analyzeLoad(loads, activities, profile);
+  const curve = fitnessFatigue(loads);
+
+  const result: Record<string, unknown> = {
+    date,
+    data: syncSummary(context),
+    load: analysis,
+    recentSessions: activities.filter((activity) => activity.date >= addDays(date, -13)).map((activity) => activityLine(activity, profile)),
+    weeklyCurve: curve.filter((_, index) => (curve.length - 1 - index) % 7 === 0).slice(-12),
+    profile: profileSummary(profile),
+  };
+
+  if (params.plan?.length) {
+    if (!analysis.today) throw new ToolInputError("No load history yet: a plan cannot be projected.");
+    const byDate = new Map<string, number>();
+    const rejected: string[] = [];
+    for (const session of params.plan) {
+      if (!isIsoDate(session.date) || session.date <= date || session.date > addDays(date, 120)) {
+        rejected.push(`${String(session.date)}: date must be within the next 120 days`);
+        continue;
+      }
+      const load =
+        isNum(session.load) && session.load >= 0
+          ? session.load
+          : isNum(session.durationMin) && isNum(session.zone)
+            ? plannedSessionLoad(session.durationMin, session.zone, profile)
+            : null;
+      if (load === null) {
+        rejected.push(`${session.date}: give either load, or durationMin and zone (needs hrMax and hrRest)`);
+        continue;
+      }
+      byDate.set(session.date, (byDate.get(session.date) ?? 0) + load);
+    }
+    const lastDate = [...byDate.keys()].sort().pop();
+    if (lastDate) {
+      // Days of the plan without a session are rest days: load 0.
+      const planned = dateRange(addDays(date, 1), lastDate).map((day) => ({ date: day, load: byDate.get(day) ?? 0 }));
+      const projection = projectLoads(analysis.today, planned);
+      const end = projection[projection.length - 1];
+      result.projection = {
+        note: "Fitness-fatigue projection of the planned loads. Form (TSB) is fitness minus fatigue on the morning of each day.",
+        points: projection.filter((point, index) => byDate.has(point.date) || index === projection.length - 1),
+        atEnd: { date: end.date, fitness: end.ctl, fatigue: end.atl, formNextMorning: round(end.ctl - end.atl, 1) },
+        fitnessChange: round(end.ctl - analysis.today.ctl, 1),
+        peakFatigue: Math.max(...projection.map((point) => point.atl)),
+        lowestForm: Math.min(...projection.map((point) => point.tsb)),
+        rejected,
+      };
+    } else {
+      result.projection = { rejected };
+    }
+  }
+  return result;
+}
+
+// --- coach_activity_deep_dive ---------------------------------------------------------------------
+
+const ACTIVITY_ID = /^\d{1,20}$/;
+
+function requireActivityId(value: unknown): string {
+  const id = typeof value === "number" ? String(value) : value;
+  if (typeof id !== "string" || !ACTIVITY_ID.test(id)) throw new ToolInputError("activityId must be a numeric Garmin activity id.");
+  return id;
+}
+
+/** `gc activities get` nests the figures under summaryDTO; flatten it to the list shape. */
+function flattenActivityDetail(payload: unknown): unknown {
+  const root = payload as Record<string, unknown> | null;
+  if (!root || typeof root !== "object") return null;
+  const summary = (root.summaryDTO ?? {}) as Record<string, unknown>;
+  const start = typeof summary.startTimeLocal === "string" ? summary.startTimeLocal.replace("T", " ") : undefined;
+  return {
+    ...summary,
+    activityId: root.activityId,
+    activityName: root.activityName,
+    activityType: root.activityTypeDTO ?? root.activityType,
+    startTimeLocal: start,
+    aerobicTrainingEffect: summary.trainingEffect ?? summary.aerobicTrainingEffect,
+  };
+}
+
+function zonesFromPayload(payload: unknown): { seconds: number[]; floorsBpm: number[] } | null {
+  if (!Array.isArray(payload)) return null;
+  const seconds = [0, 0, 0, 0, 0];
+  const floorsBpm = [0, 0, 0, 0, 0];
+  let found = false;
+  for (const raw of payload as Array<Record<string, unknown>>) {
+    const zone = raw?.zoneNumber;
+    if (!isNum(zone) || zone < 1 || zone > 5) continue;
+    if (isNum(raw.secsInZone)) seconds[zone - 1] = raw.secsInZone;
+    if (isNum(raw.zoneLowBoundary)) floorsBpm[zone - 1] = raw.zoneLowBoundary;
+    found = true;
+  }
+  return found ? { seconds, floorsBpm } : null;
+}
+
+export async function activityDeepDive(deps: Deps, params: { activityId?: unknown }) {
+  const id = requireActivityId(params.activityId);
+  const context = await loadContext(deps, { sync: false });
+  const [summary, splits, zones, weather] = await Promise.all([
+    deps.gc(["activities", "get", id]),
+    deps.gc(["activities", "splits", id]),
+    deps.gc(["activities", "hr-zones", id]),
+    deps.gc(["activities", "weather", id]),
+  ]);
+  const errors: Record<string, string> = {};
+  for (const [name, result] of Object.entries({ summary, splits, zones, weather })) if (!result.ok) errors[name] = result.code;
+
+  const stored = context.store.activities[id] ?? null;
+  const activity = (summary.ok ? normalizeActivity(flattenActivityDetail(summary.data)) : null) ?? stored;
+  if (!activity) return { activityId: id, errors, note: "Activity not found." };
+
+  const zoneData = zones.ok ? zonesFromPayload(zones.data) : null;
+  let profile = context.profile;
+  if (zoneData) {
+    activity.hrZonesS = zoneData.seconds;
+    // The activity's own zone boundaries are more exact than the configured percentages.
+    if (isNum(profile.hrMax) && zoneData.floorsBpm.every((value) => value > 0)) {
+      profile = { ...profile, hrZoneFloorsPctMax: zoneData.floorsBpm.map((bpm) => (bpm / (profile.hrMax as number)) * 100) };
+    }
+  }
+  const laps = splits.ok ? normalizeSplits(splits.data) : [];
+  const decoupling = aerobicDecoupling(laps);
+  const zoneTotal = activity.hrZonesS ? sum(activity.hrZonesS) : 0;
+
+  const w = weather.ok ? (weather.data as Record<string, unknown> | null) : null;
+  // Garmin's activity weather service reports degrees Fahrenheit.
+  const weatherC = isNum(w?.temp) ? round(((w.temp as number) - 32) * (5 / 9), 0) : null;
+  const flags: string[] = [];
+  if (isNum(weatherC) && weatherC >= 25) flags.push(`heat (${weatherC} °C): heart rate is higher at a given pace, do not read it as lost fitness`);
+  if (decoupling && decoupling.decouplingPct > 5) flags.push(`aerobic decoupling ${decoupling.decouplingPct} %: heart rate drifted upwards for the same output`);
+  if (isNum(activity.elevGainM) && isNum(activity.distanceM) && activity.elevGainM / activity.distanceM > 0.03) {
+    flags.push("hilly course: compare efforts with grade-adjusted pace or heart rate, not raw pace");
+  }
+
+  return {
+    activityId: id,
+    algorithm: ACTIVITY_ALGORITHM,
+    summary: activityLine(activity, profile),
+    load: sessionLoad(activity, profile),
+    hrZones: activity.hrZonesS && zoneTotal > 0
+      ? { minutes: activity.hrZonesS.map((seconds) => round(seconds / 60, 0)), pct: activity.hrZonesS.map((seconds) => round((seconds / zoneTotal) * 100, 0)), floorsBpm: zoneData?.floorsBpm ?? null }
+      : null,
+    decoupling,
+    efficiency:
+      isNum(activity.avgHr) && isNum(activity.gapSpeedMs ?? activity.avgSpeedMs)
+        ? { value: round((((activity.gapSpeedMs ?? activity.avgSpeedMs) as number) * 60) / activity.avgHr, 3), unit: "m/min per bpm", note: "Compare only between similar efforts (same sport, duration, terrain, temperature)." }
+        : null,
+    splits: laps.slice(0, 60).map((lap, index) => {
+      const speed = lap.distanceM / lap.durationS;
+      const gradient = isNum(lap.elevGainM) || isNum(lap.elevLossM) ? ((lap.elevGainM ?? 0) - (lap.elevLossM ?? 0)) / lap.distanceM : null;
+      const flat = lap.gapSpeedMs ?? (gradient !== null ? gradeAdjustedSpeed(speed, gradient) : null);
+      return {
+        n: index + 1,
+        km: round(lap.distanceM / 1000, 2),
+        pace: paceText(speed),
+        gradeAdjustedPace: paceText(flat),
+        avgHr: lap.avgHr,
+        gainM: roundOrNull(lap.elevGainM, 0),
+        lossM: roundOrNull(lap.elevLossM, 0),
+        gradePct: gradient === null ? null : round(gradient * 100, 1),
+      };
+    }),
+    weather: w
+      ? { temperatureC: weatherC, humidityPct: isNum(w.relativeHumidity) ? w.relativeHumidity : null, conditions: (w.weatherTypeDTO as Record<string, unknown> | undefined)?.desc ?? null, unitAssumption: "Garmin weather temperature converted from °F" }
+      : null,
+    deviceTemperatureC: { min: activity.tempMinC, max: activity.tempMaxC },
+    flags,
+    errors,
+  };
+}
+
+// --- coach_zones_and_paces ------------------------------------------------------------------------
+
+const STANDARD_DISTANCES: Array<[string, number]> = [
+  ["5 km", 5000],
+  ["10 km", 10000],
+  ["half marathon", 21097.5],
+  ["marathon", 42195],
+];
+
+export async function zonesAndPaces(deps: Deps, params: { raceDistanceM?: number; raceTimeS?: number; targetDistanceM?: number }) {
+  const context = await loadContext(deps, { sync: false });
+  const result: Record<string, unknown> = {
+    algorithm: ZONES_ALGORITHM,
+    profile: profileSummary(context.profile),
+    heartRateZones: zoneTables(context.profile),
+    zoneNote:
+      "Prefer the threshold-anchored table when a recent lactate-threshold estimate exists. Zones from an age-predicted maximum are approximate (SD about 10 bpm). On steep or technical terrain use heart rate or perceived effort, not pace.",
+  };
+  if (isNum(params.raceDistanceM) && isNum(params.raceTimeS)) {
+    const value = vdot(params.raceDistanceM, params.raceTimeS);
+    if (value === null) throw new ToolInputError("The race must last between 3.5 minutes and 5 hours.");
+    const paces = trainingPaces(value);
+    const text = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}/km`;
+    const targets: Array<[string, number]> = isNum(params.targetDistanceM) ? [[`${params.targetDistanceM} m`, params.targetDistanceM]] : STANDARD_DISTANCES;
+    result.race = {
+      input: { distanceM: params.raceDistanceM, time: clock(params.raceTimeS) },
+      vdot: value,
+      trainingPaces: {
+        easy: `${text(paces.easy.slow)} to ${text(paces.easy.fast)}`,
+        marathon: text(paces.marathon),
+        threshold: text(paces.threshold),
+        interval: text(paces.interval),
+        repetition: text(paces.repetition),
+      },
+      predictions: targets.map(([label, meters]) => {
+        const byVdot = predictTimeFromVdot(value, meters);
+        return { distance: label, vdotModel: byVdot === null ? null : clock(byVdot), riegel: clock(riegel(params.raceTimeS as number, params.raceDistanceM as number, meters)) };
+      }),
+      note: "Flat-road equivalences from one race result. They assume training specific to the target distance and do not apply to trail or mountain races.",
+    };
+  }
+  return result;
+}
+
+// --- coach_strength_analysis ----------------------------------------------------------------------
+
+export async function strengthAnalysis(deps: Deps, params: { activityId?: unknown }) {
+  const id = requireActivityId(params.activityId);
+  const result = await deps.gc(["activities", "exercise-sets", id]);
+  if (!result.ok) return { activityId: id, error: result.code, message: result.message };
+  const sets = parseExerciseSets(result.data);
+  return {
+    activityId: id,
+    algorithm: STRENGTH_ALGORITHM,
+    ...summarizeStrength(sets),
+    notes: [
+      "Exercise names come from the watch's automatic recognition and can be wrong: confirm them with the athlete.",
+      "Estimated 1RM is computed only for sets of 1 to 10 repetitions, and assumes the set was taken close to failure.",
+      "No muscle-recovery score is computed: the watch records neither proximity to failure nor technique.",
+    ],
+  };
+}
+
+// --- coach_journal_log / coach_journal_insights ---------------------------------------------------
+
+const TAG = /^[a-z0-9][a-z0-9_]{0,39}$/;
+
+export type JournalInput = {
+  date?: unknown;
+  tags?: Record<string, unknown>;
+  rpe?: number;
+  fatigue?: number;
+  soreness?: number;
+  mood?: number;
+  sleepQuality?: number;
+  stress?: number;
+  symptoms?: unknown;
+  notes?: unknown;
+};
+
+export async function journalLog(deps: Deps, params: JournalInput) {
+  const now = deps.now?.() ?? new Date();
+  const today = todayIn(deps.config.timezone, now);
+  const date = resolveDate(params.date, today);
+  const tags: Record<string, boolean | number> = {};
+  for (const [rawKey, value] of Object.entries(params.tags ?? {})) {
+    const key = rawKey.trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (!TAG.test(key)) throw new ToolInputError(`Invalid tag name "${rawKey}": use letters, digits and underscores.`);
+    if (typeof value === "boolean" || (isNum(value) && value >= 0)) tags[key] = value;
+    else throw new ToolInputError(`Tag "${rawKey}" must be true, false or a non-negative number.`);
+  }
+  const rating = (value: unknown, low: number, high: number, name: string) => {
+    if (value === undefined) return undefined;
+    if (!isNum(value) || value < low || value > high) throw new ToolInputError(`${name} must be between ${low} and ${high}.`);
+    return value;
+  };
+  const symptoms = Array.isArray(params.symptoms) ? params.symptoms.filter((item): item is string => typeof item === "string").map((item) => item.slice(0, 80)).slice(0, 10) : undefined;
+
+  return exclusive(async () => {
+    const store = await loadStore(deps.config.dataDir);
+    const previous = store.journal[date];
+    const entry: JournalEntry = {
+      ...previous,
+      date,
+      tags: { ...previous?.tags, ...tags },
+      updatedAt: now.toISOString(),
+    };
+    const set = <K extends keyof JournalEntry>(key: K, value: JournalEntry[K] | undefined) => {
+      if (value !== undefined) entry[key] = value;
+    };
+    set("rpe", rating(params.rpe, 0, 10, "rpe"));
+    set("fatigue", rating(params.fatigue, 1, 5, "fatigue"));
+    set("soreness", rating(params.soreness, 1, 5, "soreness"));
+    set("mood", rating(params.mood, 1, 5, "mood"));
+    set("sleepQuality", rating(params.sleepQuality, 1, 5, "sleepQuality"));
+    set("stress", rating(params.stress, 1, 5, "stress"));
+    set("symptoms", symptoms);
+    if (typeof params.notes === "string") entry.notes = params.notes.slice(0, 500);
+    store.journal[date] = entry;
+    await saveStore(deps.config.dataDir, store);
+    return { saved: entry, entries: Object.keys(store.journal).length };
+  });
+}
+
+export async function journalInsights(deps: Deps, params: { days?: number }) {
+  const context = await loadContext(deps, { sync: false });
+  const span = Math.min(Math.max(Math.round(params.days ?? 120), 30), deps.config.retentionDays);
+  const start = addDays(context.date, -(span - 1));
+  const days = Object.values(context.store.days).filter((day) => day.date >= start).sort((a, b) => a.date.localeCompare(b.date));
+  const journal = Object.values(context.store.journal).filter((entry) => entry.date >= start).sort((a, b) => a.date.localeCompare(b.date));
+  const ratings = (key: "fatigue" | "soreness" | "mood" | "sleepQuality" | "stress") => roundOrNull(mean(valid(journal.slice(-7).map((entry) => entry[key]))), 1);
+  return {
+    windowDays: span,
+    journalDays: journal.length,
+    wellness7: { fatigue: ratings("fatigue"), soreness: ratings("soreness"), mood: ratings("mood"), sleepQuality: ratings("sleepQuality"), stress: ratings("stress"), scale: "1 = worst, 5 = best" },
+    ...habitAssociations(days, journal),
+  };
+}
+
+// --- coach_workout_push ---------------------------------------------------------------------------
+
+const SPORTS = ["running", "cycling", "swimming", "strength_training", "walking", "hiking"];
+const STEP_TYPES = ["warmup", "interval", "recovery", "cooldown", "rest"];
+const TARGET = /^(?:no_target|(?:hr_zone|power_zone|pace_zone):[1-7]|(?:heart_rate|power|cadence):\d{2,4}(?:-\d{2,4})?)$/;
+
+export type WorkoutStep = { type: string; durationS: number; target?: string };
+
+export async function workoutPush(deps: Deps, params: { name?: unknown; sport?: unknown; steps?: unknown; confirm?: boolean }) {
+  const name = typeof params.name === "string" ? params.name.trim() : "";
+  if (!name || name.length > 80) throw new ToolInputError("name is required (80 characters at most).");
+  if (typeof params.sport !== "string" || !SPORTS.includes(params.sport)) throw new ToolInputError(`sport must be one of: ${SPORTS.join(", ")}.`);
+  if (!Array.isArray(params.steps) || !params.steps.length || params.steps.length > 60) throw new ToolInputError("steps must hold 1 to 60 steps.");
+  const steps: Array<{ type: string; duration: number; target?: string }> = [];
+  for (const raw of params.steps as WorkoutStep[]) {
+    if (!STEP_TYPES.includes(raw?.type)) throw new ToolInputError(`step type must be one of: ${STEP_TYPES.join(", ")}.`);
+    if (!isNum(raw.durationS) || raw.durationS < 10 || raw.durationS > 6 * 3600) throw new ToolInputError("step durationS must be between 10 seconds and 6 hours.");
+    if (raw.target !== undefined && !TARGET.test(raw.target)) throw new ToolInputError(`invalid target "${raw.target}": use hr_zone:2, pace_zone:3, power_zone:4, heart_rate:150 or no_target.`);
+    steps.push({ type: raw.type, duration: Math.round(raw.durationS), ...(raw.target ? { target: raw.target } : {}) });
+  }
+
+  const context = await loadContext(deps, { sync: false });
+  let load: number | null = 0;
+  for (const step of steps) {
+    const zone = /^hr_zone:(\d)$/.exec(step.target ?? "");
+    // Steps without a heart-rate zone are assumed easy (zone 1 for rest/recovery, 2 otherwise).
+    const assumed = zone ? Number(zone[1]) : step.type === "rest" || step.type === "recovery" ? 1 : 2;
+    const part = plannedSessionLoad(step.duration / 60, Math.min(assumed, 5), context.profile);
+    load = part === null || load === null ? null : load + part;
+  }
+  const preview = {
+    name,
+    sport: params.sport,
+    totalMin: round(sum(steps.map((step) => step.duration)) / 60, 0),
+    steps,
+    estimatedLoad: load === null ? null : round(load, 0),
+    currentFitness: analyzeLoad(context.loads, context.activities, context.profile).today?.ctl ?? null,
+  };
+
+  if (!deps.config.allowWorkoutPush) {
+    return { created: false, preview, message: "Writing to Garmin Connect is disabled. Set allowWorkoutPush: true in the plugin config to enable it." };
+  }
+  if (params.confirm !== true) {
+    return { created: false, preview, message: "Preview only. Show it to the athlete; call again with confirm: true once they agree." };
+  }
+  const result = await deps.gc(["workouts", "create", "--name", name, "--sport", params.sport, "--steps", JSON.stringify(steps)], { timeoutMs: 60_000 });
+  if (result.ok) {
+    const data = result.data as Record<string, unknown> | null;
+    return { created: true, workoutId: data?.workoutId ?? null, preview, message: "Workout created in Garmin Connect. It reaches the watch at the next sync; it is not scheduled on a date." };
+  }
+  // gc prints a plain confirmation instead of JSON when Garmin returns no body.
+  if (result.code === "parse_error") return { created: true, workoutId: null, preview, message: "Workout created (Garmin returned no identifier)." };
+  return { created: false, preview, error: result.code, message: result.message };
+}
+
+// --- coach_data_status ----------------------------------------------------------------------------
+
+export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
+  const context = await loadContext(deps, { sync: params.sync === true });
+  const cover = coverage(context.store, context.date, deps.config.historyDays);
+  const advice: string[] = [];
+  if (context.sync?.errors.daily === "unsupported" || context.sync?.errors.recent === "unsupported") advice.push("Update garmin-cli to 0.4.0 or later: the `gc daily` command is missing.");
+  if (Object.values(context.sync?.errors ?? {}).includes("not_configured")) advice.push("The gc binary was not found: install garmin-cli or set gcBinary in the plugin config.");
+  if (Object.values(context.sync?.errors ?? {}).includes("auth")) advice.push("Run `gc login` in the Gateway environment.");
+  if (cover.daysWithHrv < 14) advice.push(`HRV baseline needs 14 nights; ${cover.daysWithHrv} available.`);
+  if (!isNum(context.profile.hrMax)) advice.push("Set hrMax (measured maximum heart rate) in the plugin config: training load cannot be computed without it.");
+  if (context.profile.hrMaxSource === "age-formula") advice.push("hrMax comes from an age formula: replace it with a measured value when possible.");
+  if (!context.profile.sex) advice.push("Set sex in the plugin config for the correct training-load coefficients.");
+  return {
+    date: context.date,
+    timezone: deps.config.timezone,
+    dataDir: deps.config.dataDir,
+    sync: context.sync ?? "not requested (pass sync: true)",
+    coverage: cover,
+    profile: profileSummary(context.profile),
+    retentionDays: deps.config.retentionDays,
+    advice,
+  };
+}

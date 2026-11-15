@@ -1,22 +1,75 @@
 {
   "id": "coach",
   "name": "AI Coach",
-  "description": "Endurance coaching skill backed by Garmin Connect training-signal tools (via garmin-cli's gc CLI).",
+  "description": "Endurance and recovery coach: documented physiological models (HRV baseline, recovery, sleep, training load, early warning) computed on Garmin Connect data via garmin-cli's gc CLI.",
   "requiresPlugins": [],
-  "skills": ["skills/coach"],
+  "skills": [
+    "skills/coach"
+  ],
   "activation": {
     "onStartup": true
   },
   "contracts": {
-    "tools": ["coach_garmin_digest", "coach_activity_deep_dive"]
+    "tools": [
+      "coach_daily_briefing",
+      "coach_trends",
+      "coach_training_load",
+      "coach_activity_deep_dive",
+      "coach_zones_and_paces",
+      "coach_strength_analysis",
+      "coach_journal_log",
+      "coach_journal_insights",
+      "coach_workout_push",
+      "coach_data_status"
+    ]
   },
   "toolMetadata": {
-    "coach_garmin_digest": {
+    "coach_daily_briefing": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    },
+    "coach_trends": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    },
+    "coach_training_load": {
       "optional": false,
       "sideEffecting": false,
       "replaySafe": true
     },
     "coach_activity_deep_dive": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    },
+    "coach_zones_and_paces": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    },
+    "coach_strength_analysis": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    },
+    "coach_journal_log": {
+      "optional": false,
+      "sideEffecting": true,
+      "replaySafe": false
+    },
+    "coach_journal_insights": {
+      "optional": false,
+      "sideEffecting": false,
+      "replaySafe": true
+    },
+    "coach_workout_push": {
+      "optional": false,
+      "sideEffecting": true,
+      "replaySafe": false
+    },
+    "coach_data_status": {
       "optional": false,
       "sideEffecting": false,
       "replaySafe": true
@@ -28,7 +81,90 @@
     "properties": {
       "gcBinary": {
         "type": "string",
-        "description": "Path to the garmin-cli `gc` binary. Defaults to \"gc\" (resolved from PATH)."
+        "description": "Path to the garmin-cli `gc` binary (>= 0.4.0). Defaults to \"gc\" (resolved from PATH)."
+      },
+      "timezone": {
+        "type": "string",
+        "description": "IANA timezone of the athlete, used for day boundaries (e.g. Europe/Paris). Defaults to the Gateway timezone."
+      },
+      "dataDir": {
+        "type": "string",
+        "description": "Directory of the local store (nightly aggregates, activities, journal). Defaults to ~/.openclaw/coach."
+      },
+      "historyDays": {
+        "type": "integer",
+        "minimum": 30,
+        "maximum": 365,
+        "description": "Days of recovery history kept in sync. Default 90."
+      },
+      "loadHistoryDays": {
+        "type": "integer",
+        "minimum": 42,
+        "maximum": 365,
+        "description": "Days of activities used by the training-load model. Default 180."
+      },
+      "retentionDays": {
+        "type": "integer",
+        "minimum": 90,
+        "maximum": 3650,
+        "description": "Stored data older than this is deleted. Default 730."
+      },
+      "cacheMinutes": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1440,
+        "description": "Minimum delay between two Garmin fetches of recent days. Default 15."
+      },
+      "sex": {
+        "type": "string",
+        "enum": [
+          "male",
+          "female"
+        ],
+        "description": "Used for the training-load (TRIMP) coefficients."
+      },
+      "birthYear": {
+        "type": "integer",
+        "minimum": 1920,
+        "maximum": 2020,
+        "description": "Used only to estimate maximum heart rate when none is measured."
+      },
+      "hrMax": {
+        "type": "integer",
+        "minimum": 120,
+        "maximum": 230,
+        "description": "Measured maximum heart rate (bpm). Strongly recommended."
+      },
+      "hrRest": {
+        "type": "integer",
+        "minimum": 25,
+        "maximum": 100,
+        "description": "Resting heart rate (bpm). Defaults to the 60-day median measured by the watch."
+      },
+      "lthr": {
+        "type": "integer",
+        "minimum": 100,
+        "maximum": 210,
+        "description": "Lactate-threshold heart rate (bpm). Defaults to Garmin's estimate."
+      },
+      "sleepNeedHours": {
+        "type": "number",
+        "minimum": 6,
+        "maximum": 10,
+        "description": "Personal sleep need used when Garmin does not report one. Default 8."
+      },
+      "hrZoneFloorsPctMax": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "minItems": 5,
+        "maxItems": 5,
+        "description": "Lower bound of heart-rate zones 1-5 in percent of maximum heart rate. Default [50,60,70,80,90]."
+      },
+      "allowWorkoutPush": {
+        "type": "boolean",
+        "description": "Allow coach_workout_push to create workouts in Garmin Connect (after explicit confirmation). Default false."
       }
     }
   }
