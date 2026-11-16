@@ -63,6 +63,7 @@ This is a coaching tool for a healthy, training adult. It is not a medical devic
 | `coach_strength_analysis` | One strength session: sets, volume, estimated 1RM. |
 | `coach_journal_log` | Record how the athlete feels, symptoms, session RPE, habits. |
 | `coach_journal_insights` | Associations between logged habits and the following night. |
+| `coach_briefing_charts` | PNG charts (recovery gauge, ceiling, signals, HRV, load, sleep) to embed in an email or report. |
 | `coach_workout_push` | Create a workout in Garmin Connect, after the athlete approves the preview. |
 | `coach_data_status` | Coverage, sync errors, anchors in use, what to configure. |
 
@@ -218,6 +219,18 @@ that.
 - `coach_journal_insights` reports **associations**. Say "on the nights after X, your HRV was about N %
   lower (n nights, interval a to b)". Never say X causes it, and never recommend a supplement or a
   medication on that basis. With `reading: no clear difference`, say exactly that.
+
+### Emailing the briefing with charts
+
+1. `coach_daily_briefing`, then `coach_briefing_charts` (same date, `sync: false`; set `lang` to the language of the email).
+2. Write the HTML email (inline CSS, one column of at most 600 px): ceiling and one-sentence advice first, then the
+   gauge and ceiling side by side, `signals`, the other charts that support the message, and a short table.
+3. Send with `send_email`: every chart you use goes in `inlineImages` as `{ cid, path }` from the tool result, and
+   appears in the HTML as `<img src="cid:CID" width="W" alt="ALT">` using the returned `displayWidth` and `alt`.
+   Use only charts that were returned (a skipped chart has no file), and put the key numbers in the text too:
+   the pictures are not shown by every mail client.
+4. Charts illustrate the briefing; they add no claim. Never draw a conclusion from a chart that the briefing
+   does not state.
 
 ### Creating a workout on the watch
 

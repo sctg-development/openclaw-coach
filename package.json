@@ -16,6 +16,7 @@
     "skills",
     "docs",
     "examples",
+    "assets",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
@@ -27,6 +28,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@resvg/resvg-js": "2.6.2",
     "typebox": "1.3.17"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -8,7 +8,7 @@ import { addDays, clockMinutes, dateRange, daysBetween, isIsoDate, todayIn, week
 import { classifyGcError, type GcResult, type GcRunner } from "../src/garmin/gc.ts";
 import { garminDaySignals, lthrFromPayload, normalizeActivity, normalizeSplits, parseDailyExport } from "../src/garmin/normalize.ts";
 import { loadStore } from "../src/store.ts";
-import { ToolInputError, activityDeepDive, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
+import { ToolInputError, activityDeepDive, briefingCharts, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
 import { TODAY, makeHistory } from "./helpers.ts";
 
 const NOW = new Date(`${TODAY}T08:00:00Z`);
@@ -309,5 +309,65 @@ test("a workout is only written to Garmin when enabled and confirmed", async () 
     await assert.rejects(workoutPush(enabled.deps, { name: "x", sport: "golf", steps }), ToolInputError);
   } finally {
     await enabled.cleanup();
+  }
+});
+
+// --- charts ---------------------------------------------------------------------------------------
+
+function pngSize(bytes: Buffer): { width: number; height: number } {
+  assert.deepEqual([...bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "PNG signature");
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+test("briefing charts are rendered as PNG files at twice their display size, with private permissions", async () => {
+  const { deps, dataDir, cleanup } = await setup();
+  try {
+    const result = await briefingCharts(deps, { lang: "fr" });
+    assert.deepEqual(result.charts.map((chart) => chart.id), ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights"]);
+    assert.deepEqual(result.skipped, []);
+    for (const chart of result.charts) {
+      assert.ok(chart.path.startsWith(path.join(dataDir, "charts", TODAY)));
+      const bytes = await readFile(chart.path);
+      assert.deepEqual(pngSize(bytes), { width: chart.displayWidth * 2, height: chart.displayHeight * 2 });
+      assert.ok(bytes.length > 3000 && bytes.length < 400_000, `${chart.id}: ${bytes.length} bytes`);
+      assert.equal((await stat(chart.path)).mode & 0o777, 0o600);
+      assert.equal(chart.cid, `coach-${chart.id}`);
+      assert.ok(chart.alt.length > 10);
+    }
+    assert.equal((await stat(path.join(dataDir, "charts", TODAY))).mode & 0o777, 0o700);
+    if (process.env.COACH_CHART_PREVIEW) {
+      await mkdir(process.env.COACH_CHART_PREVIEW, { recursive: true });
+      for (const chart of result.charts) await copyFile(chart.path, path.join(process.env.COACH_CHART_PREVIEW, `${chart.id}.png`));
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
+test("charts skip what has no data, reject bad input and prune old folders", async () => {
+  const { deps, dataDir, cleanup } = await setup();
+  try {
+    await assert.rejects(briefingCharts(deps, { charts: ["../etc/passwd"] }), ToolInputError);
+    await assert.rejects(briefingCharts(deps, { theme: "neon" }), ToolInputError);
+
+    const old = path.join(dataDir, "charts", "2026-10-01");
+    await mkdir(old, { recursive: true });
+    await writeFile(path.join(old, "x.png"), "x");
+    await mkdir(path.join(dataDir, "charts", "notes"), { recursive: true });
+    await briefingCharts(deps, { charts: ["recovery_gauge"], theme: "dark" });
+    assert.deepEqual((await readdir(path.join(dataDir, "charts"))).sort(), [TODAY, "notes"]);
+
+    // No signal at all: the gauge still renders (n/a) but the signal rows have nothing to compare with.
+    const empty = await setup({}, { fail: (args) => (args[0] === "daily" ? { ok: true, data: { schemaVersion: 1, days: [], errors: {} } } : null) });
+    try {
+      const result = await briefingCharts(empty.deps, {});
+      assert.ok(result.skipped.some((entry) => entry.id === "hrv_trend"));
+      assert.ok(result.skipped.some((entry) => entry.id === "sleep_nights"));
+      assert.ok(result.charts.some((chart) => chart.id === "recovery_gauge"));
+    } finally {
+      await empty.cleanup();
+    }
+  } finally {
+    await cleanup();
   }
 });

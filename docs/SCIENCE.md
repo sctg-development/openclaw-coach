@@ -394,6 +394,15 @@ Table of markers tracked by the watch, each compared with a published benchmark,
 Limitations: population associations, not individual predictions or causal relationships. The watch's
 VO2max is an estimate; Garmin's "fitness age" is not a validated biological age.
 
+### 4.13 Charts (presentation only)
+
+`coach_briefing_charts` draws images of results already computed by the models above: recovery gauge (bands at
+34 and 67, section 4.3), ceiling (4.7), deviation of each overnight signal in SD units against the personal
+baseline (4.1; the dot is red from 2 SD in the unfavourable direction, amber from 1 SD), HRV with its normal
+range (4.2), fitness/fatigue/form (4.6) and sleep against the need (4.5). **No chart computes or smooths
+anything**: the 7-day HRV line is the same mean of ln rMSSD as in 4.2, and a chart is omitted when its model
+reports too little data. Colours encode the same bands as the text results; they are not clinical thresholds.
+
 ## 5. Level of evidence by element
 
 | Element | Nature | Level |
@@ -540,7 +549,7 @@ model is accepted if it passes all the cases, three times in a row.
 
 ### 9.1 Tests
 
-`npm test` (38 tests, Node ≥ 22.18) and `make test` on the `garmin-cli` side (11 tests for `gc daily`).
+`npm test` (40 tests, Node ≥ 22.18) and `make test` on the `garmin-cli` side (11 tests for `gc daily`).
 
 | Domain | Main checks |
 |---|---|
@@ -551,7 +560,7 @@ model is accepted if it passes all the cases, three times in a row.
 | Recovery, warning, decision | typical night ≈ 50; degraded night → low band; an isolated signal does not cap; two signals → `elevated`; symptom → `rest` |
 | Performance | VDOT(5 km in 20:00) = 49.8 and equivalences consistent with Daniels' tables; C(0) = 3.6 and C(0.10) ≈ 5.97 J/kg/m; decoupling on a calculated example |
 | Log | simulated effect of −20% recovered with interval excluding 0; random label without difference; groups too small not compared |
-| Integration | 90-day history fetched in 5 calls; cache; expired Garmin session; corrupted storage not overwritten; non-numeric identifiers rejected; Garmin write only if enabled and confirmed; file in mode 0600 |
+| Integration | 90-day history fetched in 5 calls; cache; expired Garmin session; corrupted storage not overwritten; non-numeric identifiers rejected; Garmin write only if enabled and confirmed; file in mode 0600; charts are valid PNG files at twice their display size, in mode 0600, skipped when data are missing, old folders deleted |
 
 The test data are synthetic (HRV 60 ms with CV of 8%, resting HR 48 ± 1.5 bpm, sleep 7.75 ± 0.5 h),
 produced by a fixed-seed generator.

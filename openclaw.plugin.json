@@ -20,6 +20,7 @@
       "coach_journal_log",
       "coach_journal_insights",
       "coach_workout_push",
+      "coach_briefing_charts",
       "coach_data_status"
     ]
   },
@@ -68,6 +69,11 @@
       "optional": false,
       "sideEffecting": true,
       "replaySafe": false
+    },
+    "coach_briefing_charts": {
+      "optional": false,
+      "sideEffecting": true,
+      "replaySafe": true
     },
     "coach_data_status": {
       "optional": false,
@@ -161,6 +167,11 @@
         "minItems": 5,
         "maxItems": 5,
         "description": "Lower bound of heart-rate zones 1-5 in percent of maximum heart rate. Default [50,60,70,80,90]."
+      },
+      "language": {
+        "type": "string",
+        "enum": ["en", "fr"],
+        "description": "Language of the labels drawn in charts (coach_briefing_charts). Default en."
       },
       "allowWorkoutPush": {
         "type": "boolean",

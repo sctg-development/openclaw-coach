@@ -23,6 +23,8 @@ export type CoachConfig = {
   sleepNeedHours: number | null;
   hrZoneFloorsPctMax: number[];
   allowWorkoutPush: boolean;
+  /** Language of chart labels. */
+  language: "en" | "fr";
 };
 
 export const DEFAULT_ZONE_FLOORS = [50, 60, 70, 80, 90];
@@ -60,5 +62,6 @@ export function parseConfig(raw: unknown): CoachConfig {
     sleepNeedHours: numberIn(cfg.sleepNeedHours, 6, 10),
     hrZoneFloorsPctMax: floorsValid ? (floors as number[]) : DEFAULT_ZONE_FLOORS,
     allowWorkoutPush: cfg.allowWorkoutPush === true,
+    language: text(cfg.language)?.toLowerCase().startsWith("fr") ? "fr" : "en",
   };
 }

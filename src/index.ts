@@ -5,6 +5,8 @@ import { createGcRunner } from "./garmin/gc.ts";
 import {
   ToolInputError,
   activityDeepDive,
+  briefingCharts,
+  CHART_IDS,
   dailyBriefing,
   dataStatus,
   journalInsights,
@@ -174,6 +176,24 @@ const TOOLS: Tool[] = [
     }),
     run: workoutPush as Tool["run"],
     summary: (r: { created: boolean; message: string }) => (r.created ? "Workout created." : r.message),
+  },
+  {
+    name: "coach_briefing_charts",
+    label: "Coach Briefing Charts",
+    description:
+      "Renders the day's key figures as PNG images for an email or report: recovery gauge, today's ceiling, overnight signals against " +
+      "the personal baseline, HRV trend with normal range, fitness/fatigue/form curve, sleep of the last 14 nights. Numbers come from " +
+      "the same models as coach_daily_briefing. Returns file paths, content ids and alt texts; pass them to send_email as inlineImages. " +
+      "Writes files under the coach data directory only. A chart without enough data is skipped with the reason.",
+    parameters: Type.Object({
+      date: DateParam,
+      sync: SyncParam,
+      charts: Type.Optional(Type.Array(Type.Union(CHART_IDS.map((id) => Type.Literal(id))), { minItems: 1, maxItems: 6, description: "Subset of charts. Default: all six." })),
+      lang: Type.Optional(Type.Union([Type.Literal("en"), Type.Literal("fr")], { description: "Label language. Default: the plugin's `language` setting." })),
+      theme: Type.Optional(Type.Union([Type.Literal("light"), Type.Literal("dark")], { description: "Default light (best for email: the card keeps its own background)." })),
+    }),
+    run: briefingCharts as Tool["run"],
+    summary: (r: { charts: unknown[]; skipped: unknown[] }) => `${r.charts.length} chart(s) rendered, ${r.skipped.length} skipped.`,
   },
   {
     name: "coach_data_status",

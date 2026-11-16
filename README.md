@@ -112,6 +112,7 @@ configuration: the files are for the coach, the configuration is for the models.
 | `coach_strength_analysis` | One strength session: volume, estimated 1RM | — |
 | `coach_journal_log` | Subjective check-in, symptoms, habits | local journal |
 | `coach_journal_insights` | Associations between habits and the following night | — |
+| `coach_briefing_charts` | Render the day's figures as PNG images (gauge, ceiling, signals, HRV, load, sleep) for an email | PNG files in `dataDir/charts` |
 | `coach_workout_push` | Create a workout in Garmin Connect (preview, then explicit confirmation) | **Garmin Connect** |
 | `coach_data_status` | Coverage, sync errors, anchors in use | local store |
 
@@ -135,6 +136,7 @@ Version 1's `coach_garmin_digest` is gone: replace it with `coach_daily_briefing
 | `loadHistoryDays` | `180` | Days of activities used by the load model. |
 | `retentionDays` | `730` | Older stored data is deleted. |
 | `cacheMinutes` | `15` | Minimum delay between two fetches of recent days. |
+| `language` | `en` | Language of the chart labels: `en` or `fr`. |
 | `allowWorkoutPush` | `false` | Allow `coach_workout_push` to write to Garmin Connect. |
 
 ```json5
@@ -149,6 +151,44 @@ Version 1's `coach_garmin_digest` is gone: replace it with `coach_daily_briefing
 }
 ```
 
+## Charts for emails
+
+`coach_briefing_charts` draws the day's figures as PNG images, from the same model results as
+`coach_daily_briefing` (it computes nothing of its own):
+
+| Chart id | Size (px) | Shows |
+|---|---|---|
+| `recovery_gauge` | 280 x 210 | Recovery index 0-100 on a three-band gauge |
+| `ceiling` | 280 x 210 | Today's ceiling (rest / easy / moderate / hard) and the suggested load |
+| `signals` | 600 x 246 | Last night's HRV, resting heart rate, respiration, skin temperature and SpO2 against your own usual range |
+| `hrv_trend` | 600 x 260 | 28 nights of HRV, the 7-day trend and the personal normal range |
+| `load_curve` | 600 x 350 | 8 weeks of fitness (CTL), fatigue (ATL) and form (TSB) |
+| `sleep_nights` | 600 x 260 | 14 nights, stacked by stage, against the sleep need |
+
+Images are rendered at twice their display size (sharp on high-density screens) with a bundled font
+([Inter](assets/fonts/LICENSE.txt), SIL OFL), so the output does not depend on the fonts of the host. A chart
+without enough data is skipped with the reason. Parameters: `charts` (subset), `lang` (`en` or `fr`, default
+the `language` setting), `theme` (`light` or `dark`, default `light`: an email keeps its own opaque card).
+Files are written to `<dataDir>/charts/<date>/<id>.png` (owner-only permissions) and folders older than 14
+days are deleted.
+
+To put them **inside** an email, the mail tool must send them as inline images: with the `sctg-mail`
+plugin's `send_email`, pass each chart as `inlineImages: [{ cid, path }]` and reference it in the HTML:
+
+```html
+<table role="presentation" width="600" cellpadding="0" cellspacing="0"><tr>
+  <td width="300"><img src="cid:coach-recovery_gauge" width="280" alt="Recovery 51/100 (moderate)"></td>
+  <td width="300"><img src="cid:coach-ceiling" width="280" alt="Today's ceiling: easy"></td>
+</tr></table>
+<img src="cid:coach-hrv_trend" width="600" alt="HRV trend" style="display:block;max-width:100%;height:auto">
+```
+
+The tool result already contains, for each chart, the `cid` (`coach-<id>`), the `path`, the display size and a
+ready-made `alt` text. `send_email` only reads image files from `~/.openclaw/coach/charts` (configurable with
+its `inlineImageRoots`), refuses anything that is not a real PNG or JPEG, and falls back to a text-only
+rendering on channels that cannot carry inline images. Always write the `alt` text: many mail clients block
+images until the reader allows them.
+
 ## Data and privacy
 
 The plugin keeps a single JSON file (`coach-store.json`, owner-only permissions) with nightly aggregates,
@@ -161,7 +201,7 @@ Gateway uses: that is health data, so choose the provider accordingly (see `docs
 ```bash
 npm ci
 npm run typecheck
-npm test          # 38 tests, synthetic data, no Garmin access needed
+npm test          # 40 tests, synthetic data, no Garmin access needed
 npm run build
 ```
 

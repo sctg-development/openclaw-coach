@@ -4,6 +4,12 @@
  * dependencies as arguments so that tests can inject a fake `gc` and clock.
  */
 
+import fs from "node:fs/promises";
+import path from "node:path";
+import { ceilingLadder, hrvChart, loadChart, recoveryGauge, signalsChart, sleepChart, type Chart, type HrvPoint, type SleepPoint } from "./charts/build.ts";
+import type { Lang } from "./charts/labels.ts";
+import { renderPng } from "./charts/render.ts";
+import { THEMES, type ThemeName } from "./charts/svg.ts";
 import type { CoachConfig } from "./config.ts";
 import { addDays, dateRange, isIsoDate, todayIn, weekStart } from "./dates.ts";
 import type { GcRunner } from "./garmin/gc.ts";
@@ -35,7 +41,7 @@ import {
 } from "./science/performance.ts";
 import { decideReadiness } from "./science/readiness.ts";
 import { analyzeRecovery, analyzeWarning } from "./science/recovery.ts";
-import { analyzeSleep } from "./science/sleep.ts";
+import { analyzeSleep, describeNight } from "./science/sleep.ts";
 import { isNum, mean, round, roundOrNull, sum, valid } from "./science/stats.ts";
 import { STRENGTH_ALGORITHM, parseExerciseSets, summarizeStrength } from "./science/strength.ts";
 import { activitiesFrom, daysBetweenDates, loadStore, saveStore, type StoreData } from "./store.ts";
@@ -669,5 +675,116 @@ export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
     profile: profileSummary(context.profile),
     retentionDays: deps.config.retentionDays,
     advice,
+  };
+}
+
+// --- coach_briefing_charts ------------------------------------------------------------------------
+
+export const CHART_IDS = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights"] as const;
+export type ChartId = (typeof CHART_IDS)[number];
+
+const CHART_KEEP_DAYS = 14;
+
+/** Deletes chart folders (YYYY-MM-DD) older than the retention, never anything else. */
+async function pruneCharts(root: string, today: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await fs.readdir(root);
+  } catch {
+    return;
+  }
+  const limit = addDays(today, -CHART_KEEP_DAYS);
+  for (const name of names) {
+    if (isIsoDate(name) && name < limit) await fs.rm(path.join(root, name), { recursive: true, force: true });
+  }
+}
+
+export async function briefingCharts(
+  deps: Deps,
+  params: { date?: unknown; sync?: boolean; charts?: string[]; lang?: string; theme?: string },
+) {
+  const requested = params.charts?.length ? params.charts : [...CHART_IDS];
+  for (const id of requested) {
+    if (!(CHART_IDS as readonly string[]).includes(id)) throw new ToolInputError(`Unknown chart '${id}'. Available: ${CHART_IDS.join(", ")}.`);
+  }
+  if (params.theme !== undefined && params.theme !== "light" && params.theme !== "dark") throw new ToolInputError("theme must be 'light' or 'dark'.");
+  if (params.lang !== undefined && params.lang !== "en" && params.lang !== "fr") throw new ToolInputError("lang must be 'en' or 'fr'.");
+  const lang: Lang = (params.lang as Lang | undefined) ?? deps.config.language;
+  const theme = THEMES[(params.theme as ThemeName | undefined) ?? "light"];
+
+  const context = await loadContext(deps, params);
+  const { days, activities, loads, profile, date, store } = context;
+  const hrv = analyzeHrv(days);
+  const sleep = analyzeSleep(days, profile);
+  const recovery = analyzeRecovery(days, profile);
+  const warning = analyzeWarning(days);
+  const load = analyzeLoad(loads, activities, profile);
+  const readiness = decideReadiness({ hrv, recovery, warning, sleep, load, journal: store.journal[date] ?? null });
+
+  const common = { theme, lang };
+  const builders: Record<ChartId, () => Chart | string> = {
+    recovery_gauge: () => recoveryGauge({ ...common, score: recovery.score, band: recovery.band }),
+    ceiling: () => ceilingLadder({ ...common, ceiling: readiness.ceiling, suggestedLoad: readiness.suggestedLoad }),
+    signals: () => {
+      const rows = recovery.deviations;
+      if (!Object.values(rows).some((row) => row.z !== null)) return "No overnight signal has a personal baseline yet (about 14 nights are needed).";
+      return signalsChart({ ...common, rows });
+    },
+    hrv_trend: () => {
+      const window = days.slice(-28);
+      const series = days.map(lnRmssd);
+      const points: HrvPoint[] = window.map((day, index) => {
+        const end = days.length - window.length + index;
+        const trend = valid(series.slice(Math.max(0, end - 6), end + 1));
+        const ln = series[end];
+        return { date: day.date, ms: ln === null ? null : Math.exp(ln), trendMs: trend.length >= 3 ? Math.exp(mean(trend) as number) : null };
+      });
+      if (!points.some((point) => point.ms !== null)) return "No HRV value in the last 28 days.";
+      return hrvChart({ ...common, points, range: hrv.baseline ? { lowMs: hrv.baseline.lowMs, highMs: hrv.baseline.highMs } : null });
+    },
+    load_curve: () => {
+      const curve = fitnessFatigue(loads).slice(-56);
+      if (curve.length < 14) return "Fewer than 14 days of load history.";
+      return loadChart({ ...common, points: curve });
+    },
+    sleep_nights: () => {
+      const nights: SleepPoint[] = days.slice(-14).map((day) => {
+        const night = describeNight(day, profile);
+        const s = day.sleep;
+        const hours = (seconds: number | null | undefined) => (isNum(seconds) ? seconds / 3600 : null);
+        return { date: day.date, hours: night?.durationH ?? null, deepH: hours(s?.deepS), lightH: hours(s?.lightS), remH: hours(s?.remS), needH: night?.needH ?? profile.sleepNeedS / 3600 };
+      });
+      if (!nights.some((night) => night.hours !== null)) return "No sleep recorded in the last 14 nights.";
+      return sleepChart({ ...common, nights });
+    },
+  };
+
+  const folder = path.join(deps.config.dataDir, "charts");
+  const directory = path.join(folder, date);
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const charts: Array<{ id: ChartId; path: string; cid: string; displayWidth: number; displayHeight: number; pixelWidth: number; pixelHeight: number; bytes: number; alt: string }> = [];
+  const skipped: Array<{ id: ChartId; reason: string }> = [];
+  for (const id of requested as ChartId[]) {
+    const built = builders[id]();
+    if (typeof built === "string") {
+      skipped.push({ id, reason: built });
+      continue;
+    }
+    const rendered = await renderPng(built.svg);
+    const file = path.join(directory, `${id}.png`);
+    await fs.writeFile(file, rendered.png, { mode: 0o600 });
+    charts.push({ id, path: file, cid: `coach-${id}`, displayWidth: built.width, displayHeight: built.height, pixelWidth: rendered.width, pixelHeight: rendered.height, bytes: rendered.png.length, alt: built.alt });
+  }
+  await pruneCharts(folder, context.today);
+
+  return {
+    date,
+    lang,
+    theme: theme.name,
+    charts,
+    skipped,
+    usage:
+      "Each chart is a PNG file. To embed it in an email, pass { cid, path } in send_email's inlineImages and reference it in the HTML as " +
+      '<img src="cid:CID" width="displayWidth" alt="alt" style="display:block;max-width:100%;height:auto">. Gauge and ceiling are 280 px wide: place them side by side in a two-cell table.',
   };
 }
