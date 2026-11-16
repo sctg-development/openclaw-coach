@@ -17,7 +17,7 @@ physiological models in code** and gives the model compact, sourced results to i
   a habit journal with association statistics, long-term health markers.
 
 Every formula, constant, threshold, level of evidence and limit is in
-[`docs/SCIENCE.md`](docs/SCIENCE.md) (in French, written for review by sport-science and medical teams,
+[`docs/SCIENCE.md`](docs/SCIENCE.md) (written for review by sport-science and medical teams,
 with a verified bibliography and LLM recommendations). The coaching behaviour and safety rules are in
 [`skills/coach/SKILL.md`](skills/coach/SKILL.md).
 
@@ -41,11 +41,64 @@ openclaw plugins install npm:@sctg/openclaw-coach
 2. Configure the athlete's anchors (see Configuration). At least `timezone`, `sex` and a measured `hrMax`.
 3. Ask the coach to run `coach_data_status` with `sync: true`: it fetches 90 days of recovery signals and
    180 days of activities (about 25 Garmin requests), and says what is missing.
-4. Create `ATHLETE.md` in the workspace from the template in the skill, or ask the coach to do it with you.
+4. Create `ATHLETE.md` (and, when you want the coach to follow a plan, `PLAN.md`) in the agent's workspace: see
+   [Workspace files](#workspace-files).
 5. Optionally schedule check-ins with OpenClaw Automations (recipes in the skill).
 
 Baselines need history: HRV and recovery are `calibrating` until 14 nights exist, and the load model
 needs about a month to be usable and three months to be stable.
+
+## Workspace files
+
+The coach computes from your watch data; what the watch cannot know (your goal, injuries, constraints,
+availability, the plan) lives in two plain Markdown files in the **agent's workspace**, which the coach reads
+at the start of its routines.
+
+| File | Required | Who writes it | Role |
+|---|---|---|---|
+| `ATHLETE.md` | Strongly recommended | You, once, then when your situation changes | Bio, measured anchors, goal, injury and medical history, **binding constraints**, availability, preferences |
+| `PLAN.md` | Optional | The coach (you can edit it too) | Phases, the next 7 days, adjustment rules, log of changes |
+
+Examples with a fictional athlete are in [`examples/ATHLETE.md`](examples/ATHLETE.md) and
+[`examples/PLAN.md`](examples/PLAN.md). The constraints in `ATHLETE.md` are never overridden by the coach or
+by a model output; symptoms always come before signals.
+
+### Where they go
+
+The workspace is `~/.openclaw/workspace/` of the user running the Gateway (`agents.defaults.workspace`
+can move it). In the OpenClaw container image this is
+`/home/node/.openclaw/workspace/`, on the persistent volume:
+
+```text
+~/.openclaw/workspace/ATHLETE.md
+~/.openclaw/workspace/PLAN.md
+```
+
+### How to create them
+
+1. **With the coach (simplest).** Say: "Create my ATHLETE.md; ask me the questions you need, one block at a
+   time, and show it to me before saving." The coach follows the template in
+   [`skills/coach/SKILL.md`](skills/coach/SKILL.md). For `PLAN.md`, give your goal and availability and ask
+   for a plan; the coach projects it with `coach_training_load` before saving it.
+2. **By hand.** Copy the examples and replace every value:
+
+   ```bash
+   cp examples/ATHLETE.md ~/.openclaw/workspace/ATHLETE.md
+   cp examples/PLAN.md    ~/.openclaw/workspace/PLAN.md
+   ```
+
+   On a Kubernetes deployment, copy into the pod instead
+   (`kubectl cp ATHLETE.md <namespace>/<pod>:/home/node/.openclaw/workspace/ATHLETE.md -c gateway`).
+3. **Seeded by the Helm chart** (`sctg-claw`): put the content under `openclaw.workspaceFiles.ATHLETE.md` in
+   your **private** values. The init container copies it on first boot only (an existing file on the volume
+   is kept), so later edits are made in the workspace, not in the values. Do not put health data in a public
+   chart.
+
+Tips: keep `ATHLETE.md` under about one page (it is sent to the LLM provider in every session, see
+[Data and privacy](#data-and-privacy)); write measured values with how and when they were measured; put every
+restriction in *Current constraints* as an instruction ("no ...", "at most ..."), with the date of the next
+review; remove a constraint only when the person who set it lifts it. Also set `hrMax` and `lthr` in the plugin
+configuration: the files are for the coach, the configuration is for the models.
 
 ## Tools
 

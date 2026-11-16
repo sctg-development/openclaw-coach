@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.log
 .DS_Store
+v2/bevel/bevel_releases_accurate.md
+v2/bevel/bevel_releases_raw.md
+v2/bevel/cahier_des_charges_concurrentiel_bevel.md

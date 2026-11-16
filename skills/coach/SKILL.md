@@ -262,6 +262,10 @@ the watch has synced.
 
 ## ATHLETE.md template
 
+A filled-in example (fictional athlete) and a matching `PLAN.md` ship with the plugin in `examples/`. When the
+athlete asks you to create the file, interview them block by block, show the result, and save it only after
+they agree, to `ATHLETE.md` in the workspace.
+
 ```markdown
 # Athlete Profile
 
