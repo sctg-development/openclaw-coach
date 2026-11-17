@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/sctg-development/openclaw-coach/main/assets/logo.png" alt="OpenClaw Coach logo" width="160">
+</p>
+
 # OpenClaw Coach
 
 An endurance and recovery coach plugin for [OpenClaw](https://github.com/openclaw/openclaw), built on
@@ -189,10 +193,109 @@ its `inlineImageRoots`), refuses anything that is not a real PNG or JPEG, and fa
 rendering on channels that cannot carry inline images. Always write the `alt` text: many mail clients block
 images until the reader allows them.
 
-## Sample result
-This was sent by `Mistral Medium 3.5`. 
-<img width="651" height="1576" alt="image" src="https://github.com/user-attachments/assets/22106b8d-3b31-483d-89d9-446044804811" />
+## Daily briefing e-mail
 
+The plugin computes and draws; an OpenClaw automation (cron job) asks the agent to assemble and send the
+e-mail. Create it as an **isolated agent turn** with delivery disabled, because the mail leaves through
+`send_email`, not through a chat channel:
+
+```bash
+openclaw cron add --name "Briefing entrainement" --cron "0 10 * * *" --tz Europe/Paris \
+  --session isolated --no-deliver --message "$(cat briefing-prompt.txt)"
+```
+
+(The exact flags depend on your OpenClaw version: check `openclaw cron add --help`. To change an existing
+job, use `openclaw cron edit <id> --message ...`.) A job that runs in the *main* session does not receive the
+plugin's tools reliably: use an isolated one.
+
+The prompt below is the one used for the sample result. It is shown in English; the original is in French
+and the e-mail is written in the language you ask for (`lang` of `coach_briefing_charts`, or the plugin's
+`language` setting). Replace `<my address>` before using it.
+
+<details>
+<summary>The prompt</summary>
+
+```text
+You are the coach. Send me the morning briefing by e-mail, as HTML with charts.
+
+DATA
+1. Read ATHLETE.md (goals, constraints, injuries) and PLAN.md if it exists.
+2. Call coach_daily_briefing. Use only its fields: do not invent any figure, nor any physiological or
+   nutritional advice that is not in it. A null field means "not measured": do not mention it, or write "n/a".
+3. If the briefing is an error, or if a block has a status other than "ready" with no usable explanation,
+   send a short mail saying so, without charts, instead of making things up.
+4. Call coach_briefing_charts with lang "fr" and sync false. Use only the charts it returns (a "skipped"
+   chart has no file: do not reference it).
+
+E-MAIL
+One message, sent with send_email:
+- to: <my address>
+- subject: "Briefing du <weekday> <date> : <ceiling>" (rest = Repos, easy = Facile, moderate = Modéré,
+  hard = Intense)
+- bodyHtml: the HTML described below
+- bodyText: short version, no Markdown (ceiling, one sentence, the 3 key figures)
+- inlineImages: [{cid, path}] for EVERY chart used, exactly as returned by the tool. Each cid must appear
+  in the HTML as src="cid:CID".
+
+HTML STRUCTURE (inline CSS only, column of at most 600 px, system font, white background, no script, no
+external image, tables for layout, horizontally centred, working on mobile and desktop)
+1. Banner with today's ceiling: white text on a coloured background (Repos #64748b, Facile #d97706,
+   Modéré #2563eb, Intense #16a34a), then ONE sentence of at most 20 words saying what to do today, taking
+   the constraints of ATHLETE.md and PLAN.md into account.
+2. A table of 2 cells of 300 px: recovery_gauge | ceiling (image width 280).
+3. "Why": at most 3 bullets, main cause first, with the figures and their personal reference
+   (e.g. "7-day HRV: 29 ms, your normal range: 31-34 ms").
+4. Image signals (width 600).
+5. Image hrv_trend, then sleep_nights (width 600).
+6. Image load_curve (width 600) on Sundays only.
+7. "To watch": only the warnings of the briefing (early warning, symptoms, sleep debt, load, missing
+   data). Factual, calm tone: no shouting capitals, no "imperative".
+8. A small 3-row table, in text (images are not displayed by every client):
+   - Sleep: duration / need, efficiency, bedtime and wake-up
+   - Yesterday's session: type, duration, average heart rate, load
+   - Load: CTL, ATL, TSB, change over 7 days
+9. Footer: "Tell me how you feel (fatigue, pain, motivation)" + "This message is a training aid, not
+   medical advice."
+
+EACH IMAGE
+<img src="cid:CID" width="W" alt="ALT" style="display:block;max-width:100%;height:auto">
+with CID, W (displayWidth, or 280 in the 2-cell table) and ALT taken from the tool result.
+Also keep the key figures in the text: images may be blocked by the mail client.
+
+STYLE
+Informal "you" (tutoiement), French, short sentences, no emoji, no list of generic advice, no figure that
+does not come from the tools.
+
+Reply only "envoyé" or the error met. If send_email returns degraded: true, say so.
+```
+
+</details>
+
+How the prompt is built, and why:
+
+- **Data first, then charts.** The model reads the athlete's context, calls `coach_daily_briefing`, and only
+  then asks for charts. A failed or incomplete briefing produces a short text mail instead of invented numbers.
+- **Nothing is computed by the model.** Every figure comes from a tool result; `null` means "not measured".
+  Charts are drawn from the same results (see "Charts for emails").
+- **One `send_email` call** carries the HTML, a plain-text alternative and the `inlineImages` list. Each `cid`
+  returned by `coach_briefing_charts` must be referenced as `src="cid:CID"` in the HTML.
+- **Layout rules** are explicit (table layout, inline CSS, 600 px column, centred) because mail clients ignore
+  most modern CSS. Ceiling colours match the charts. The key figures are repeated as text, since many clients
+  block images by default.
+- **The load curve** is only added on Sundays to keep the daily mail short.
+
+First run: execute the job once by hand and check the received mail. If `send_email` reports
+`degraded: true`, the images were replaced by their alt text (see `skills/sctg-mail`).
+
+## Sample result
+
+Sent by an automation using the prompt above, with `Mistral Medium 3.5` as the model.
+A raw, anonymised copy of the message is in
+[`sample-output-mistral-medium-3-5.eml`](sample-output-mistral-medium-3-5.eml).
+
+<p align="center">
+  <img width="651" alt="Sample daily briefing e-mail" src="https://github.com/user-attachments/assets/22106b8d-3b31-483d-89d9-446044804811">
+</p>
 
 ## Data and privacy
 
@@ -227,4 +330,6 @@ gc daily yesterday --keys
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The logo files in `assets/` (`logo.ai`, `logo.svg`, `logo.png`) are
+copyright SCTG Development and licensed under CC BY-NC-SA 4.0, not MIT. The Inter fonts keep their own
+licence (`assets/fonts/LICENSE.txt`).
