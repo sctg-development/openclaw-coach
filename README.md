@@ -127,6 +127,8 @@ Version 1's `coach_garmin_digest` is gone: replace it with `coach_daily_briefing
 
 | Key | Default | Description |
 |---|---|---|
+| `garminBackend` | `auto` | `native`: fetch in the Gateway process with [`@sctg/garmin-ts-client`](https://github.com/sctg-development/garmin-ts-client); `gc`: the garmin-cli binary; `auto`: native when the package and a token file are present, else gc. Creating workouts always uses `gc`. |
+| `garminTokenFile` | `$GARMINTOKENS` or `~/.config/garmin-cli/tokens/garmin_tokens.json` | Token file of the native backend (the file `gc login` or `garmin-ts login` writes). |
 | `gcBinary` | `gc` | Path to the garmin-cli binary. |
 | `timezone` | Gateway timezone | IANA timezone of the athlete (day boundaries). |
 | `dataDir` | `~/.openclaw/coach` | Local store directory. |

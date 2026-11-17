@@ -38,6 +38,11 @@ const MESSAGES: Record<GcErrorCode, string> = {
   error: "The gc command failed.",
 };
 
+/** A failure result with the stable message for `code`, for runners other than the CLI. */
+export function gcFailure(code: GcErrorCode): GcResult {
+  return { ok: false, code, message: MESSAGES[code] };
+}
+
 export type GcRunner = (args: string[], options?: { timeoutMs?: number }) => Promise<GcResult>;
 
 /** Builds a runner with its own concurrency limit (Garmin rate-limits bursts). */

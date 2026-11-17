@@ -1,7 +1,7 @@
 import { Type, type TSchema } from "typebox";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { parseConfig } from "./config.ts";
-import { createGcRunner } from "./garmin/gc.ts";
+import { createGarminRunner } from "./garmin/backend.ts";
 import {
   ToolInputError,
   activityDeepDive,
@@ -234,7 +234,7 @@ export default definePluginEntry({
   description: "Endurance and recovery coach: documented physiological models computed on Garmin data, with a coaching skill.",
   register(api) {
     const config = parseConfig(api.pluginConfig);
-    const deps: Deps = { config, gc: createGcRunner(config.gcBinary) };
+    const deps: Deps = { config, gc: createGarminRunner(config) };
 
     for (const tool of TOOLS) {
       api.registerTool({

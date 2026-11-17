@@ -95,6 +95,15 @@
         "type": "string",
         "description": "Path to the garmin-cli `gc` binary (>= 0.4.0). Defaults to \"gc\" (resolved from PATH)."
       },
+      "garminBackend": {
+        "type": "string",
+        "enum": ["auto", "native", "gc"],
+        "description": "How Garmin data is fetched: \"native\" runs @sctg/garmin-ts-client in the Gateway process, \"gc\" uses the garmin-cli binary, \"auto\" (default) uses native when the package and a token file are present and gc otherwise. Workout creation always uses gc."
+      },
+      "garminTokenFile": {
+        "type": "string",
+        "description": "Token file of the native backend. Defaults to $GARMINTOKENS or ~/.config/garmin-cli/tokens/garmin_tokens.json (the file `gc login` writes)."
+      },
       "timezone": {
         "type": "string",
         "description": "IANA timezone of the athlete, used for day boundaries (e.g. Europe/Paris). Defaults to the Gateway timezone."

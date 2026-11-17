@@ -663,6 +663,8 @@ export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
   if (context.sync?.errors.daily === "unsupported" || context.sync?.errors.recent === "unsupported") advice.push("Update garmin-cli to 0.4.0 or later: the `gc daily` command is missing.");
   if (Object.values(context.sync?.errors ?? {}).includes("not_configured")) advice.push("The gc binary was not found: install garmin-cli or set gcBinary in the plugin config.");
   if (Object.values(context.sync?.errors ?? {}).includes("auth")) advice.push("Run `gc login` in the Gateway environment.");
+  const backend = await (deps.gc as { backend?: () => Promise<string> }).backend?.();
+  if (backend === "native-unavailable") advice.push("garminBackend is native but @sctg/garmin-ts-client or its token file is missing: install the package and log in (`gc login` or `garmin-ts login`), or set garminBackend to auto.");
   if (cover.daysWithHrv < 14) advice.push(`HRV baseline needs 14 nights; ${cover.daysWithHrv} available.`);
   if (!isNum(context.profile.hrMax)) advice.push("Set hrMax (measured maximum heart rate) in the plugin config: training load cannot be computed without it.");
   if (context.profile.hrMaxSource === "age-formula") advice.push("hrMax comes from an age formula: replace it with a measured value when possible.");
@@ -671,6 +673,7 @@ export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
     date: context.date,
     timezone: deps.config.timezone,
     dataDir: deps.config.dataDir,
+    garminBackend: backend ?? "gc",
     sync: context.sync ?? "not requested (pass sync: true)",
     coverage: cover,
     profile: profileSummary(context.profile),

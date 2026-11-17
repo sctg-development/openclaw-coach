@@ -5,8 +5,14 @@ import path from "node:path";
 import { isValidTimezone } from "./dates.ts";
 import type { Sex } from "./types.ts";
 
+export type GarminBackend = "auto" | "native" | "gc";
+
 export type CoachConfig = {
   gcBinary: string;
+  /** `native`: @sctg/garmin-ts-client in-process; `gc`: the garmin-cli binary; `auto`: native when available, else gc. */
+  garminBackend: GarminBackend;
+  /** Token file of the native backend (default: $GARMINTOKENS or the file `gc login` writes). */
+  garminTokenFile: string | null;
   timezone: string;
   dataDir: string;
   /** Days of recovery history kept in sync (baselines need 60 + margin). */
@@ -48,6 +54,8 @@ export function parseConfig(raw: unknown): CoachConfig {
   const sex = text(cfg.sex);
   return {
     gcBinary: text(cfg.gcBinary) ?? "gc",
+    garminBackend: cfg.garminBackend === "native" || cfg.garminBackend === "gc" ? cfg.garminBackend : "auto",
+    garminTokenFile: text(cfg.garminTokenFile),
     timezone: timezone && isValidTimezone(timezone) ? timezone : Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     dataDir: text(cfg.dataDir) ?? path.join(os.homedir(), ".openclaw", "coach"),
     historyDays: numberIn(cfg.historyDays, 30, 365) ?? 90,

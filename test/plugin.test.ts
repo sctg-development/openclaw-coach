@@ -7,6 +7,8 @@ import { parseConfig, type CoachConfig } from "../src/config.ts";
 import { addDays, clockMinutes, dateRange, daysBetween, isIsoDate, todayIn, weekStart } from "../src/dates.ts";
 import { classifyGcError, type GcResult, type GcRunner } from "../src/garmin/gc.ts";
 import { garminDaySignals, lthrFromPayload, normalizeActivity, normalizeSplits, parseDailyExport } from "../src/garmin/normalize.ts";
+import { createGarminRunner } from "../src/garmin/backend.ts";
+import { isNativeCommand, nativeRunner, type NativeGarmin } from "../src/garmin/native.ts";
 import { renderBriefingEmail } from "../src/email.ts";
 import { loadStore } from "../src/store.ts";
 import { ToolInputError, activityDeepDive, briefingCharts, briefingEmail, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
@@ -427,4 +429,92 @@ test("the e-mail layout copes with missing charts and missing figures", () => {
   assert.match(email.html, /background:#64748b/);
   assert.match(email.html, /No session yesterday/);
   assert.match(email.text, /Sleep: n\/a/);
+});
+
+// --- native Garmin backend ------------------------------------------------------------------------
+
+function fakeNative(overrides: Partial<NativeGarmin> = {}): NativeGarmin & { calls: string[] } {
+  const calls: string[] = [];
+  const api: NativeGarmin & { calls: string[] } = {
+    calls,
+    daily: async (options) => (calls.push(`daily ${options.start} ${options.end} ${options.detail}`), { days: [] }),
+    activities: async (options) => (calls.push(`activities ${options.start} ${options.end}`), []),
+    activity: async (id, view) => (calls.push(`activity ${id} ${view ?? "get"}`), { id }),
+    metric: async (name, date) => (calls.push(`metric ${name} ${date}`), []),
+    lactateThreshold: async () => (calls.push("lactate"), {}),
+    ...overrides,
+  };
+  return api;
+}
+
+test("gc arguments map to native calls with the same meaning", async () => {
+  const api = fakeNative();
+  const run = nativeRunner(api);
+  assert.deepEqual(await run(["daily", "--start", "2026-11-01", "--end", "2026-11-16", "--no-detail"]), { ok: true, data: { days: [] } });
+  await run(["daily", "--start", "2026-11-16", "--end", "2026-11-16", "--detail"]);
+  await run(["activities", "--start", "2026-10-01", "--end", "2026-11-16"]);
+  await run(["activities", "get", "123"]);
+  await run(["activities", "hr-zones", "123"]);
+  await run(["activities", "exercise-sets", "123"]);
+  await run(["metrics", "training-readiness", "2026-11-16"]);
+  await run(["metrics", "training-status", "2026-11-16"]);
+  await run(["metrics", "lactate-threshold"]);
+  assert.deepEqual(api.calls, [
+    "daily 2026-11-01 2026-11-16 false", "daily 2026-11-16 2026-11-16 true", "activities 2026-10-01 2026-11-16",
+    "activity 123 get", "activity 123 hr-zones", "activity 123 exercise-sets",
+    "metric training-readiness 2026-11-16", "metric training-status 2026-11-16", "lactate",
+  ]);
+});
+
+test("native failures keep the stable codes, and unsupported or malformed commands are refused", async () => {
+  const limited = nativeRunner(fakeNative({ daily: async () => Promise.reject(Object.assign(new Error("x"), { code: "rate_limited" })) }));
+  assert.deepEqual(await limited(["daily", "--start", "2026-11-16"]), { ok: false, code: "rate_limited", message: (await limited(["daily", "--start", "2026-11-16"]) as { message: string }).message });
+  const run = nativeRunner(fakeNative());
+  for (const args of [["workouts", "create", "--name", "x"], ["activities", "get", "../1"], ["daily", "--start", "nope"], ["metrics", "training-status", "x"]]) {
+    const result = await run(args);
+    assert.equal(result.ok, false, args.join(" "));
+    assert.equal((result as { code: string }).code, "unsupported");
+  }
+  assert.equal(isNativeCommand(["workouts", "create"]), false);
+  assert.equal(isNativeCommand(["activities", "last"]), false);
+});
+
+test("the backend picks native when available, falls back to gc, and always sends writes to gc", async () => {
+  const gcCalls: string[][] = [];
+  const gc = (async (args: string[]) => (gcCalls.push(args), { ok: true, data: "gc" })) as GcRunner;
+  const config = { gcBinary: "gc", garminBackend: "auto" as const, garminTokenFile: null };
+
+  const native = fakeNative();
+  const auto = createGarminRunner(config, { gc, load: async () => native });
+  assert.equal((await auto(["daily", "--start", "2026-11-16"])).ok, true);
+  assert.equal(native.calls.length, 1);
+  assert.deepEqual(gcCalls, []);
+  await auto(["workouts", "create", "--name", "x"]);
+  assert.deepEqual(gcCalls, [["workouts", "create", "--name", "x"]]);
+
+  gcCalls.length = 0;
+  const missing = createGarminRunner(config, { gc, load: async () => "not_configured" });
+  assert.deepEqual(await missing(["daily", "--start", "2026-11-16"]), { ok: true, data: "gc" });
+
+  const strict = createGarminRunner({ ...config, garminBackend: "native" }, { gc, load: async () => "auth" });
+  assert.equal((await strict(["daily", "--start", "2026-11-16"]) as { code: string }).code, "auth");
+
+  let loads = 0;
+  const once = createGarminRunner(config, { gc, load: async () => (loads += 1, native) });
+  await once(["daily", "--start", "2026-11-16"]);
+  await once(["daily", "--start", "2026-11-15"]);
+  assert.equal(loads, 1, "the backend is chosen once");
+
+  const forced = createGarminRunner({ ...config, garminBackend: "gc" }, { gc, load: async () => native });
+  gcCalls.length = 0;
+  await forced(["daily", "--start", "2026-11-16"]);
+  assert.equal(gcCalls.length, 1);
+});
+
+test("configuration accepts only known backends", () => {
+  assert.equal(parseConfig({}).garminBackend, "auto");
+  assert.equal(parseConfig({ garminBackend: "native" }).garminBackend, "native");
+  assert.equal(parseConfig({ garminBackend: "gc" }).garminBackend, "gc");
+  assert.equal(parseConfig({ garminBackend: "other" }).garminBackend, "auto");
+  assert.equal(parseConfig({ garminTokenFile: " /x/t.json " }).garminTokenFile, "/x/t.json");
 });
