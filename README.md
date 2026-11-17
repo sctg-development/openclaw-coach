@@ -338,7 +338,7 @@ Gateway uses: that is health data, so choose the provider accordingly (see `docs
 ```bash
 npm ci
 npm run typecheck
-npm test          # 42 tests, synthetic data, no Garmin access needed
+npm test          # 46 tests, synthetic data, no Garmin access needed
 npm run build
 ```
 
