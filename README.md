@@ -189,6 +189,11 @@ its `inlineImageRoots`), refuses anything that is not a real PNG or JPEG, and fa
 rendering on channels that cannot carry inline images. Always write the `alt` text: many mail clients block
 images until the reader allows them.
 
+## Sample result
+This was sent by `Mistral Medium 3.5`. 
+<img width="651" height="1576" alt="image" src="https://github.com/user-attachments/assets/22106b8d-3b31-483d-89d9-446044804811" />
+
+
 ## Data and privacy
 
 The plugin keeps a single JSON file (`coach-store.json`, owner-only permissions) with nightly aggregates,
