@@ -331,5 +331,5 @@ gc daily yesterday --keys
 ## License
 
 MIT — see [LICENSE](LICENSE). The logo files in `assets/` (`logo.ai`, `logo.svg`, `logo.png`) are
-copyright SCTG Development and licensed under CC BY-NC-SA 4.0, not MIT. The Inter fonts keep their own
+copyright SCTG Development and licensed under CC BY-SA 4.0, not MIT. The Inter fonts keep their own
 licence (`assets/fonts/LICENSE.txt`).
