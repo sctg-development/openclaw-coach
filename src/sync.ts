@@ -128,7 +128,12 @@ export async function syncStore(store: StoreData, gc: GcRunner, config: CoachCon
 
   if (config.lthr === null && (store.lthr === null || daysBetween(store.lthr.at.slice(0, 10), today) >= LTHR_REFRESH_DAYS)) {
     const result = await gc(["metrics", "lactate-threshold"]);
-    const value = result.ok ? lthrFromPayload(result.data) : null;
+    let value = result.ok ? lthrFromPayload(result.data) : null;
+    if (value === null && result.ok) {
+      // The latest-threshold endpoint can be empty while the current biometric profile has the value.
+      const anchors = await gc(["metrics", "anchors"]);
+      value = anchors.ok ? lthrFromPayload(anchors.data) : null;
+    }
     if (value !== null) store.lthr = { value, at: stamp };
   }
 

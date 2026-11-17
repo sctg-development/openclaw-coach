@@ -100,11 +100,11 @@ export function normalizeSplits(payload: unknown): Split[] {
   return out;
 }
 
-/** Lactate-threshold heart rate from `gc metrics lactate-threshold`. */
+/** Lactate-threshold heart rate from `gc metrics lactate-threshold` or `gc metrics anchors`. */
 export function lthrFromPayload(payload: unknown): number | null {
   const root = obj(payload);
-  const block = obj(root?.speed_and_heart_rate) ?? root;
-  const value = positive(block, "heartRate", "lactateThresholdHeartRate");
+  const block = obj(root?.speed_and_heart_rate) ?? obj(root?.lactateThreshold) ?? root;
+  const value = positive(block, "heartRate", "heartRateBpm", "lactateThresholdHeartRate");
   return value !== null && value >= 100 && value <= 210 ? Math.round(value) : null;
 }
 

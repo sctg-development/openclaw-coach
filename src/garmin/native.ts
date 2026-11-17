@@ -11,6 +11,8 @@ export interface NativeGarmin {
   activity(id: string, view?: ActivityView): Promise<unknown>;
   metric(name: "training-readiness" | "training-status", date: string): Promise<unknown>;
   lactateThreshold(): Promise<unknown>;
+  /** Lactate-threshold heart rate, FTP and VO2 max (`gc metrics anchors`). Absent in older versions of the package. */
+  anchors?(): Promise<unknown>;
 }
 
 export type ActivityView = "splits" | "hr-zones" | "weather" | "exercise-sets";
@@ -34,7 +36,7 @@ function flags(args: string[]): { positional: string[]; values: Map<string, stri
 export function isNativeCommand(args: string[]): boolean {
   const [command, sub] = args;
   if (command === "daily" || command === "activities") return command === "daily" || !sub || sub.startsWith("--") || ACTIVITY_VIEWS.includes(sub);
-  return command === "metrics" && (sub === "training-readiness" || sub === "training-status" || sub === "lactate-threshold");
+  return command === "metrics" && (sub === "training-readiness" || sub === "training-status" || sub === "lactate-threshold" || sub === "anchors");
 }
 
 function code(error: unknown): GcErrorCode {
@@ -64,6 +66,9 @@ export function nativeRunner(api: NativeGarmin): GcRunner {
         data = await api.activities({ start, end: values.get("--end") });
       } else if (positional[0] === "lactate-threshold") {
         data = await api.lactateThreshold();
+      } else if (positional[0] === "anchors") {
+        if (!api.anchors) return gcFailure("unsupported");
+        data = await api.anchors();
       } else {
         const date = positional[1];
         if (!date || !DATE.test(date)) return gcFailure("unsupported");
@@ -99,5 +104,6 @@ export async function loadNative(tokenFile: string | null, moduleName = "@sctg/g
     activity: (id, view) => call(view === undefined ? "getActivity" : { splits: "activitySplits", "hr-zones": "activityHrZones", weather: "activityWeather", "exercise-sets": "activityExerciseSets" }[view], id),
     metric: (name, date) => call(name === "training-readiness" ? "trainingReadiness" : "trainingStatus", date),
     lactateThreshold: () => call("lactateThreshold"),
+    ...(typeof mod.anchors === "function" ? { anchors: () => call("anchors") } : {}),
   };
 }

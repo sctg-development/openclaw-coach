@@ -130,11 +130,31 @@ test("Garmin payloads are normalized, and unknown shapes give nulls or nothing",
   assert.equal(normalizeSplits({ lapDTOs: [{ distance: 1000, duration: 300, averageHR: 150 }, { distance: 0, duration: 10 }] }).length, 1);
   assert.equal(lthrFromPayload({ speed_and_heart_rate: { heartRate: 162.4 } }), 162);
   assert.equal(lthrFromPayload({ speed_and_heart_rate: { heartRate: 20 } }), null);
+  assert.equal(lthrFromPayload({ lactateThreshold: { heartRateBpm: 164, date: "2026-04-02" } }), 164);
+  assert.equal(lthrFromPayload({ lactateThreshold: { heartRateBpm: null } }), null);
   assert.equal(parseDailyExport({ schemaVersion: 2, days: [] }), null);
   assert.deepEqual(garminDaySignals(null, null), {});
 });
 
 // --- sync and tools -------------------------------------------------------------------------------
+
+test("when the latest-threshold endpoint is empty, the heart-rate threshold comes from the biometric anchors", async () => {
+  const { deps, calls, cleanup } = await setup({}, {
+    fail: (args) => {
+      if (args[0] === "metrics" && args[1] === "lactate-threshold") return { ok: true, data: { speed_and_heart_rate: { heartRate: null } } };
+      if (args[0] === "metrics" && args[1] === "anchors") return { ok: true, data: { lactateThreshold: { heartRateBpm: 164, date: "2026-04-02" } } };
+      return null;
+    },
+  });
+  try {
+    const briefing = await dailyBriefing(deps, {});
+    assert.equal(briefing.profile.lthr, 164);
+    assert.equal(briefing.profile.lthrSource, "garmin");
+    assert.ok(calls.some((args) => args[1] === "anchors"));
+  } finally {
+    await cleanup();
+  }
+});
 
 test("the first briefing backfills history in few requests, then serves from the store", async () => {
   const { deps, calls, dataDir, cleanup } = await setup();
@@ -442,6 +462,7 @@ function fakeNative(overrides: Partial<NativeGarmin> = {}): NativeGarmin & { cal
     activity: async (id, view) => (calls.push(`activity ${id} ${view ?? "get"}`), { id }),
     metric: async (name, date) => (calls.push(`metric ${name} ${date}`), []),
     lactateThreshold: async () => (calls.push("lactate"), {}),
+    anchors: async () => (calls.push("anchors"), { lactateThreshold: { heartRateBpm: 164 } }),
     ...overrides,
   };
   return api;
@@ -459,10 +480,13 @@ test("gc arguments map to native calls with the same meaning", async () => {
   await run(["metrics", "training-readiness", "2026-11-16"]);
   await run(["metrics", "training-status", "2026-11-16"]);
   await run(["metrics", "lactate-threshold"]);
+  assert.deepEqual(await run(["metrics", "anchors"]), { ok: true, data: { lactateThreshold: { heartRateBpm: 164 } } });
+  const old = await nativeRunner(fakeNative({ anchors: undefined }))(["metrics", "anchors"]);
+  assert.equal(old.ok === false && old.code, "unsupported");
   assert.deepEqual(api.calls, [
     "daily 2026-11-01 2026-11-16 false", "daily 2026-11-16 2026-11-16 true", "activities 2026-10-01 2026-11-16",
     "activity 123 get", "activity 123 hr-zones", "activity 123 exercise-sets",
-    "metric training-readiness 2026-11-16", "metric training-status 2026-11-16", "lactate",
+    "metric training-readiness 2026-11-16", "metric training-status 2026-11-16", "lactate", "anchors",
   ]);
 });
 
