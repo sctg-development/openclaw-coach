@@ -116,6 +116,7 @@ configuration: the files are for the coach, the configuration is for the models.
 | `coach_strength_analysis` | One strength session: volume, estimated 1RM | — |
 | `coach_journal_log` | Subjective check-in, symptoms, habits | local journal |
 | `coach_journal_insights` | Associations between habits and the following night | — |
+| `coach_briefing_email` | Build the whole daily e-mail (subject, HTML, text, inline images), ready for any mail tool | PNG files in `dataDir/charts` |
 | `coach_briefing_charts` | Render the day's figures as PNG images (gauge, ceiling, signals, HRV, load, sleep) for an email | PNG files in `dataDir/charts` |
 | `coach_workout_push` | Create a workout in Garmin Connect (preview, then explicit confirmation) | **Garmin Connect** |
 | `coach_data_status` | Coverage, sync errors, anchors in use | local store |
@@ -195,8 +196,31 @@ images until the reader allows them.
 
 ## Daily briefing e-mail
 
-The plugin computes and draws; an OpenClaw automation (cron job) asks the agent to assemble and send the
-e-mail. Create it as an **isolated agent turn** with delivery disabled, because the mail leaves through
+`coach_briefing_email` builds the whole message in code: subject, HTML (one centred 600 px column, ceiling
+banner, recovery gauge and ceiling side by side, "why", signals, HRV, sleep, "to watch", a text summary table,
+footer), a plain-text version and the list of inline images. The layout does not depend on the model, so a
+small model produces the same mail as a large one. It sends nothing: pass `subject`, `bodyHtml`, `bodyText`
+and `inlineImages` to any mail tool that supports inline images by content id (`send_email` of the
+`sctg-mail` plugin does; with a tool that does not, send `bodyText` alone, the key figures are in it).
+
+The model only writes the three sentences that need judgement, in the athlete's language: `headline` (what to
+do today, with `ATHLETE.md` and `PLAN.md` in mind), `why` (up to 3 bullets) and `watch` (up to 4 cautions).
+Left out, `headline` defaults to the meaning of the ceiling in the chosen language; `why` and `watch` default to the
+rules and caveats of the models, which are in English, so they are used for English mails only and the sections
+are omitted for French (the result's `notes` say so). Always pass all three; pass `watch: []` when there is nothing to watch. The fitness curve
+is added on Sundays (`weekly: true` forces it).
+
+Minimal automation prompt:
+
+```text
+Read ATHLETE.md and PLAN.md. Call coach_briefing_email with lang "fr", then write headline (one sentence: what
+to do today, given my constraints), why (up to 3 bullets with figures and my personal reference) and watch
+(cautions only), using only figures from coach_daily_briefing, and call coach_briefing_email again with them.
+Send the result unchanged with send_email to <my address>: subject, bodyHtml, bodyText, inlineImages.
+If the briefing is an error, send a short text mail instead. Reply only "sent" or the error.
+```
+
+Create the job as an **isolated agent turn** with delivery disabled, because the mail leaves through
 `send_email`, not through a chat channel:
 
 ```bash
@@ -208,7 +232,10 @@ openclaw cron add --name "Briefing entrainement" --cron "0 10 * * *" --tz Europe
 job, use `openclaw cron edit <id> --message ...`.) A job that runs in the *main* session does not receive the
 plugin's tools reliably: use an isolated one.
 
-The prompt below is the one used for the sample result. It is shown in English; the original is in French
+### Custom layout: the full prompt
+
+If you want to control the HTML yourself, the model can assemble it from `coach_daily_briefing` and
+`coach_briefing_charts` instead. The prompt below is the one used for the sample result. It is shown in English; the original is in French
 and the e-mail is written in the language you ask for (`lang` of `coach_briefing_charts`, or the plugin's
 `language` setting). Replace `<my address>` before using it.
 
@@ -309,7 +336,7 @@ Gateway uses: that is health data, so choose the provider accordingly (see `docs
 ```bash
 npm ci
 npm run typecheck
-npm test          # 40 tests, synthetic data, no Garmin access needed
+npm test          # 42 tests, synthetic data, no Garmin access needed
 npm run build
 ```
 

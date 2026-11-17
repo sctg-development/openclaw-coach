@@ -403,6 +403,10 @@ range (4.2), fitness/fatigue/form (4.6) and sleep against the need (4.5). **No c
 anything**: the 7-day HRV line is the same mean of ln rMSSD as in 4.2, and a chart is omitted when its model
 reports too little data. Colours encode the same bands as the text results; they are not clinical thresholds.
 
+`coach_briefing_email` assembles these charts and the briefing's own fields into an e-mail with a fixed template. It adds
+no figure: the default "why" and "to watch" texts are the rules and caveats of the readiness decision (4.7), verbatim.
+Texts supplied by the model are limited in length and HTML-escaped.
+
 ## 5. Level of evidence by element
 
 | Element | Nature | Level |

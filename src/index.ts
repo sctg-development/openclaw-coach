@@ -6,6 +6,7 @@ import {
   ToolInputError,
   activityDeepDive,
   briefingCharts,
+  briefingEmail,
   CHART_IDS,
   dailyBriefing,
   dataStatus,
@@ -194,6 +195,26 @@ const TOOLS: Tool[] = [
     }),
     run: briefingCharts as Tool["run"],
     summary: (r: { charts: unknown[]; skipped: unknown[] }) => `${r.charts.length} chart(s) rendered, ${r.skipped.length} skipped.`,
+  },
+  {
+    name: "coach_briefing_email",
+    label: "Coach Briefing Email",
+    description:
+      "Builds the complete daily briefing e-mail in code: subject, HTML (centred column, ceiling banner, recovery gauge, signals, HRV, sleep, " +
+      "text summary table), plain-text version and inline-image list. Pass subject, bodyHtml, bodyText and inlineImages to a mail tool " +
+      "(send_email) without rewriting them. Optionally supply headline, why and watch in the athlete's language to personalise the three " +
+      "sentences that need judgement. The load curve is added on Sundays. It does not send anything.",
+    parameters: Type.Object({
+      date: DateParam,
+      sync: SyncParam,
+      lang: Type.Optional(Type.Union([Type.Literal("en"), Type.Literal("fr")], { description: "Language of labels and default texts. Default: the plugin's `language` setting." })),
+      headline: Type.Optional(Type.String({ maxLength: 240, description: "One sentence: what to do today, taking ATHLETE.md and PLAN.md into account. Default: the meaning of the ceiling." })),
+      why: Type.Optional(Type.Array(Type.String({ maxLength: 240 }), { maxItems: 3, description: "Up to 3 bullets, main cause first, with figures and their personal reference. Default: the rules that set the ceiling, for English only; omitted for French when not supplied." })),
+      watch: Type.Optional(Type.Array(Type.String({ maxLength: 240 }), { maxItems: 4, description: "Cautions only (early warning, symptoms, sleep debt, load, missing data). Default: the briefing's caveats, for English only; omitted for French when not supplied. Pass [] when there is nothing to watch." })),
+      weekly: Type.Optional(Type.Boolean({ description: "Add the fitness/fatigue/form curve. Default: only on Sundays." })),
+    }),
+    run: briefingEmail as Tool["run"],
+    summary: (r: { subject: string; inlineImages: unknown[] }) => `E-mail built: "${r.subject}", ${r.inlineImages.length} inline image(s).`,
   },
   {
     name: "coach_data_status",

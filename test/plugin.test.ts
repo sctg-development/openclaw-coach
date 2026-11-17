@@ -7,8 +7,9 @@ import { parseConfig, type CoachConfig } from "../src/config.ts";
 import { addDays, clockMinutes, dateRange, daysBetween, isIsoDate, todayIn, weekStart } from "../src/dates.ts";
 import { classifyGcError, type GcResult, type GcRunner } from "../src/garmin/gc.ts";
 import { garminDaySignals, lthrFromPayload, normalizeActivity, normalizeSplits, parseDailyExport } from "../src/garmin/normalize.ts";
+import { renderBriefingEmail } from "../src/email.ts";
 import { loadStore } from "../src/store.ts";
-import { ToolInputError, activityDeepDive, briefingCharts, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
+import { ToolInputError, activityDeepDive, briefingCharts, briefingEmail, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
 import { TODAY, makeHistory } from "./helpers.ts";
 
 const NOW = new Date(`${TODAY}T08:00:00Z`);
@@ -370,4 +371,60 @@ test("charts skip what has no data, reject bad input and prune old folders", asy
   } finally {
     await cleanup();
   }
+});
+
+// --- briefing e-mail ------------------------------------------------------------------------------
+
+test("the briefing e-mail is built in code: subject, html, text and one inline image per chart", async () => {
+  const { deps, cleanup } = await setup();
+  try {
+    const result = await briefingEmail(deps, { lang: "fr", headline: "Séance facile <b>aujourd'hui</b>.", why: ["VFC 7 j : 29 ms, ta plage normale : 31-34 ms"] });
+    assert.match(result.subject, /^Briefing du dimanche 15 novembre : (Repos|Facile|Modéré|Intense)$/);
+    assert.equal(result.inlineImages.length, 6, "Sunday adds the load curve");
+    for (const image of result.inlineImages) {
+      assert.match(image.cid, /^coach-[a-z_]+$/);
+      assert.equal(result.bodyHtml.split(`src="cid:${image.cid}"`).length, 2, `${image.cid} is referenced exactly once`);
+      assert.ok((await stat(image.path)).isFile());
+    }
+    assert.ok(!result.bodyHtml.includes("<b>aujourd'hui"), "model text is escaped");
+    assert.match(result.bodyHtml, /&lt;b&gt;aujourd&#39;hui&lt;\/b&gt;/);
+    assert.ok(!/<script|https?:\/\/(?!www\.w3\.org)/i.test(result.bodyHtml.replace(/<img[^>]*>/g, "")), "no script and no external resource");
+    assert.match(result.bodyHtml, /max-width:600px/);
+    assert.match(result.bodyText, /Plafond du jour : /);
+    assert.ok(!/No subjective|below the personal/.test(result.bodyHtml + result.bodyText), "no English default text in a French mail");
+    assert.ok(result.notes.some((note) => note.startsWith("watch not supplied")));
+    assert.match(result.bodyText, /Ce message est une aide à l'entraînement/);
+    assert.ok(!/<(table|img|td|html)/i.test(result.bodyText), "plain text carries no layout markup");
+
+    const weekday = await briefingEmail(deps, { date: addDays(TODAY, -1), sync: false, weekly: false });
+    assert.equal(weekday.inlineImages.some((image) => image.cid === "coach-load_curve"), false);
+    assert.ok(weekday.bodyText.length > 100 && weekday.subject.startsWith("Briefing for "), "falls back to the configured language and default texts");
+
+    await assert.rejects(briefingEmail(deps, { why: ["a", "b", "c", "d"] }), ToolInputError);
+    await assert.rejects(briefingEmail(deps, { headline: "x".repeat(300) }), ToolInputError);
+    await assert.rejects(briefingEmail(deps, { lang: "de" }), ToolInputError);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("the e-mail layout copes with missing charts and missing figures", () => {
+  const email = renderBriefingEmail({
+    lang: "en",
+    date: "2026-11-17",
+    ceiling: "rest",
+    headline: "Rest today.",
+    why: [],
+    watch: [],
+    charts: [],
+    sleep: null,
+    sessions: [],
+    load: null,
+  });
+  assert.equal(email.subject, "Briefing for Tuesday, November 17: Rest");
+  assert.ok(!email.html.includes("<img"));
+  assert.ok(!email.html.includes("<ul"));
+  assert.match(email.html, /background:#64748b/);
+  assert.match(email.html, /No session yesterday/);
+  assert.match(email.text, /Sleep: n\/a/);
 });

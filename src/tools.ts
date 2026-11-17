@@ -12,6 +12,7 @@ import { renderPng } from "./charts/render.ts";
 import { THEMES, type ThemeName } from "./charts/svg.ts";
 import type { CoachConfig } from "./config.ts";
 import { addDays, dateRange, isIsoDate, todayIn, weekStart } from "./dates.ts";
+import { defaultHeadline, renderBriefingEmail, type EmailSession } from "./email.ts";
 import type { GcRunner } from "./garmin/gc.ts";
 import { garminDaySignals, normalizeActivity, normalizeSplits } from "./garmin/normalize.ts";
 import { resolveProfile } from "./profile.ts";
@@ -786,5 +787,82 @@ export async function briefingCharts(
     usage:
       "Each chart is a PNG file. To embed it in an email, pass { cid, path } in send_email's inlineImages and reference it in the HTML as " +
       '<img src="cid:CID" width="displayWidth" alt="alt" style="display:block;max-width:100%;height:auto">. Gauge and ceiling are 280 px wide: place them side by side in a two-cell table.',
+  };
+}
+
+// --- coach_briefing_email -------------------------------------------------------------------------
+
+const EMAIL_CHARTS: ChartId[] = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "sleep_nights"];
+const MAX_LINE = 240;
+
+function textList(value: unknown, name: string, max: number): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length > max) throw new ToolInputError(`${name} must be a list of at most ${max} short texts.`);
+  return value.map((item) => {
+    if (typeof item !== "string" || !item.trim() || item.length > MAX_LINE) throw new ToolInputError(`Each item of ${name} must be a non-empty text of at most ${MAX_LINE} characters.`);
+    return item.trim();
+  });
+}
+
+/**
+ * The whole daily briefing e-mail, built in code: subject, HTML, plain text and the inline-image list,
+ * ready to pass to any mail tool. The model may supply the three sentences that need judgement (headline,
+ * why, watch) in the athlete's language; everything else is deterministic.
+ */
+export async function briefingEmail(
+  deps: Deps,
+  params: { date?: unknown; sync?: boolean; lang?: string; headline?: unknown; why?: unknown; watch?: unknown; weekly?: boolean },
+) {
+  if (params.lang !== undefined && params.lang !== "en" && params.lang !== "fr") throw new ToolInputError("lang must be 'en' or 'fr'.");
+  const lang: Lang = (params.lang as Lang | undefined) ?? deps.config.language;
+  if (params.headline !== undefined && params.headline !== null && (typeof params.headline !== "string" || !params.headline.trim() || params.headline.length > MAX_LINE)) {
+    throw new ToolInputError(`headline must be one non-empty sentence of at most ${MAX_LINE} characters.`);
+  }
+  const why = textList(params.why, "why", 3);
+  const watch = textList(params.watch, "watch", 4);
+  const headline = typeof params.headline === "string" ? params.headline.trim() : undefined;
+
+  // One sync at most: the briefing fetches, the charts reuse the local store.
+  const briefing = await dailyBriefing(deps, { date: params.date, sync: params.sync });
+  const weekly = params.weekly ?? new Date(`${briefing.date}T12:00:00Z`).getUTCDay() === 0;
+  const charts = await briefingCharts(deps, { date: briefing.date, sync: false, lang, theme: "light", charts: weekly ? [...EMAIL_CHARTS, "load_curve"] : EMAIL_CHARTS });
+
+  const night = briefing.sleep.lastNight;
+  const sessions: EmailSession[] = briefing.activities.yesterday.map((line) => ({ type: line.type, name: line.name, durationMin: line.durationMin, avgHr: line.avgHr, load: line.load }));
+  const email = renderBriefingEmail({
+    lang,
+    date: briefing.date,
+    ceiling: briefing.readiness.ceiling,
+    headline: headline || defaultHeadline(lang, briefing.readiness.ceiling),
+    // The rules and caveats of the models are written in English: they are a fallback for English mails only,
+    // never mixed into a French one.
+    why: why ?? (lang === "en" ? briefing.readiness.reasons.slice(0, 3).map((reason) => reason.detail) : []),
+    watch: watch ?? (lang === "en" ? briefing.readiness.caveats.slice(0, 4) : []),
+    charts: charts.charts.map((chart) => ({ id: chart.id, cid: chart.cid, displayWidth: chart.displayWidth, alt: chart.alt })),
+    sleep: night ? { durationH: night.durationH, needH: night.needH, efficiencyPct: night.efficiencyPct, bedtime: night.bedtime, wakeTime: night.wakeTime } : null,
+    sessions,
+    load: briefing.load.today ? { ctl: briefing.load.today.ctl, atl: briefing.load.today.atl, tsb: briefing.load.today.tsb, weekChangePct: briefing.load.weekChangePct } : null,
+  });
+
+  return {
+    date: briefing.date,
+    lang,
+    ceiling: briefing.readiness.ceiling,
+    status: { recovery: briefing.recovery.status, sleep: briefing.sleep.status, load: briefing.load.status },
+    subject: email.subject,
+    bodyHtml: email.html,
+    bodyText: email.text,
+    inlineImages: charts.charts.map((chart) => ({ cid: chart.cid, path: chart.path })),
+    skipped: charts.skipped,
+    notes: [
+      ...(headline === undefined ? ["headline not supplied: a generic sentence was used."] : []),
+      ...(why === undefined && lang !== "en" ? ["why not supplied: the section is omitted (default texts are English). Call again with why."] : []),
+      ...(watch === undefined && lang !== "en" ? ["watch not supplied: the section is omitted (default texts are English). Call again with watch, or [] if there is nothing to watch."] : []),
+    ],
+    usage:
+      "Send subject, bodyHtml, bodyText and inlineImages unchanged with a mail tool that supports inline images by content id (send_email does). " +
+      "Do not rewrite the HTML. To personalise, call this tool again with headline (one sentence on what to do today), why (up to 3 bullets) " +
+      "and watch (up to 4 cautions) written in the athlete's language, using only figures from coach_daily_briefing. " +
+      "If images cannot be sent, send bodyText alone: the key figures are in it.",
   };
 }

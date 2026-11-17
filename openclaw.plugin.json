@@ -21,6 +21,7 @@
       "coach_journal_insights",
       "coach_workout_push",
       "coach_briefing_charts",
+      "coach_briefing_email",
       "coach_data_status"
     ]
   },
@@ -71,6 +72,11 @@
       "replaySafe": false
     },
     "coach_briefing_charts": {
+      "optional": false,
+      "sideEffecting": true,
+      "replaySafe": true
+    },
+    "coach_briefing_email": {
       "optional": false,
       "sideEffecting": true,
       "replaySafe": true

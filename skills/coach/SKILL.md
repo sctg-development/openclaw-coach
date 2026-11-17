@@ -63,6 +63,7 @@ This is a coaching tool for a healthy, training adult. It is not a medical devic
 | `coach_strength_analysis` | One strength session: sets, volume, estimated 1RM. |
 | `coach_journal_log` | Record how the athlete feels, symptoms, session RPE, habits. |
 | `coach_journal_insights` | Associations between logged habits and the following night. |
+| `coach_briefing_email` | The complete daily e-mail built in code (subject, HTML, text, inline images). Optional `headline`, `why`, `watch`. |
 | `coach_briefing_charts` | PNG charts (recovery gauge, ceiling, signals, HRV, load, sleep) to embed in an email or report. |
 | `coach_workout_push` | Create a workout in Garmin Connect, after the athlete approves the preview. |
 | `coach_data_status` | Coverage, sync errors, anchors in use, what to configure. |
@@ -221,6 +222,13 @@ that.
   medication on that basis. With `reading: no clear difference`, say exactly that.
 
 ### Emailing the briefing with charts
+
+Preferred: call `coach_briefing_email` (set `lang`). It returns `subject`, `bodyHtml`, `bodyText` and
+`inlineImages`: send them unchanged with `send_email`. Do not rewrite the HTML. To personalise, call it again
+with `headline` (one sentence: what to do today given `ATHLETE.md` and `PLAN.md`), `why` (up to 3 bullets) and
+`watch` (cautions only), in the athlete's language and with figures taken only from `coach_daily_briefing`.
+
+Manual assembly, only if you need a different layout:
 
 1. `coach_daily_briefing`, then `coach_briefing_charts` (same date, `sync: false`; set `lang` to the language of the email).
 2. Write the HTML email (inline CSS, one column of at most 600 px): ceiling and one-sentence advice first, then the
