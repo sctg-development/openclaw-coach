@@ -31,7 +31,8 @@ This is a coaching aid for a healthy training adult. It is not a medical device 
 
 - An OpenClaw Gateway (2026.8.2+).
 - [`gc`](https://github.com/sctg-development/garmin-cli) **0.4.0 or later** (for `gc daily`), installed
-  and authenticated (`gc login ...`) in the environment the Gateway runs in.
+  and authenticated in the environment the Gateway runs in: sign in with `garmin-ts login` (it handles multi-factor
+  codes); `gc login` is only a last resort if Garmin refuses the native sign-in.
 
 ## Install
 

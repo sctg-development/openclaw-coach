@@ -21,7 +21,7 @@ export function classifyGcError(error: { code?: unknown; killed?: boolean; signa
   const text = stderr.toLowerCase();
   // Checked first: a usage message mentions "--tokenstore" and must not read as an auth failure.
   if (text.includes("no such command") || text.includes("no such option") || text.includes("usage:")) return "unsupported";
-  if (text.includes("authentication") || text.includes("gc login") || text.includes("not logged in")) return "auth";
+  if (text.includes("authentication") || text.includes("gc login") || text.includes("garmin-ts login") || text.includes("not logged in")) return "auth";
   if (text.includes("rate limit") || text.includes("too many requests") || text.includes("429")) return "rate_limited";
   if (text.includes("connection error") || text.includes("timed out") || text.includes("max retries")) return "connection";
   return "error";
@@ -29,7 +29,7 @@ export function classifyGcError(error: { code?: unknown; killed?: boolean; signa
 
 const MESSAGES: Record<GcErrorCode, string> = {
   not_configured: "The gc binary was not found or is not executable (check gcBinary).",
-  auth: "Garmin session missing or expired: run `gc login` in the Gateway environment.",
+  auth: "Garmin session missing or expired: run `garmin-ts login` in the Gateway environment (`gc login` only as a last resort).",
   rate_limited: "Garmin Connect is rate limiting requests: wait before retrying.",
   timeout: "The gc command timed out.",
   unsupported: "This gc version does not support the command (garmin-cli >= 0.4.0 is required for `gc daily`).",

@@ -662,9 +662,9 @@ export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
   const advice: string[] = [];
   if (context.sync?.errors.daily === "unsupported" || context.sync?.errors.recent === "unsupported") advice.push("Update garmin-cli to 0.4.0 or later: the `gc daily` command is missing.");
   if (Object.values(context.sync?.errors ?? {}).includes("not_configured")) advice.push("The gc binary was not found: install garmin-cli or set gcBinary in the plugin config.");
-  if (Object.values(context.sync?.errors ?? {}).includes("auth")) advice.push("Run `gc login` in the Gateway environment.");
+  if (Object.values(context.sync?.errors ?? {}).includes("auth")) advice.push("Sign in again with `garmin-ts login` in the Gateway environment (GARMIN_LOGIN and GARMIN_PASSWORD set; it asks for the multi-factor code). Use `gc login` only as a last resort if Garmin refuses the native sign-in.");
   const backend = await (deps.gc as { backend?: () => Promise<string> }).backend?.();
-  if (backend === "native-unavailable") advice.push("garminBackend is native but @sctg/garmin-ts-client or its token file is missing: install the package and log in (`gc login` or `garmin-ts login`), or set garminBackend to auto.");
+  if (backend === "native-unavailable") advice.push("garminBackend is native but @sctg/garmin-ts-client or its token file is missing: install the package and log in with `garmin-ts login` (`gc login` only as a last resort), or set garminBackend to auto.");
   if (cover.daysWithHrv < 14) advice.push(`HRV baseline needs 14 nights; ${cover.daysWithHrv} available.`);
   if (!isNum(context.profile.hrMax)) advice.push("Set hrMax (measured maximum heart rate) in the plugin config: training load cannot be computed without it.");
   if (context.profile.hrMaxSource === "age-formula") advice.push("hrMax comes from an age formula: replace it with a measured value when possible.");
