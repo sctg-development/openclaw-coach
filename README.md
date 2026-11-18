@@ -29,20 +29,75 @@ This is a coaching aid for a healthy training adult. It is not a medical device 
 
 ## Requirements
 
-- An OpenClaw Gateway (2026.8.2+).
-- [`gc`](https://github.com/sctg-development/garmin-cli) **0.4.0 or later** (for `gc daily`), installed
-  and authenticated in the environment the Gateway runs in: sign in with `garmin-ts login` (it handles multi-factor
-  codes); `gc login` is only a last resort if Garmin refuses the native sign-in.
+- An OpenClaw Gateway (2026.8.2+) running Node.js 22 or later.
+- A Garmin Connect account and a first sign-in (see [Sign in to Garmin](#sign-in-to-garmin)).
+- [`@sctg/garmin-ts-client`](https://github.com/sctg-development/garmin-ts-client) **0.3.2 or later**: the native
+  Garmin client. It is a dependency of the plugin, so installing the plugin installs it; it provides the
+  `garmin-ts` command used for the first sign-in.
+- Optional, [`gc`](https://github.com/sctg-development/garmin-cli) **0.6.1 or later**: only needed to create
+  workouts (the coach pushes them through `gc`) and as a last-resort sign-in. Neither package is published on
+  PyPI, so `gc` is installed by hand (see below).
+
+### Installing `gc` by hand (optional)
+
+`gc` is not on PyPI. With [uv](https://docs.astral.sh/uv/), install it straight from its release tag:
+
+```bash
+uv tool install "git+https://github.com/sctg-development/garmin-cli@v0.6.1"
+gc connect list        # checks the install: prints the discovered endpoints, no login needed
+```
+
+Alternatively, download a binary from the
+[releases page](https://github.com/sctg-development/garmin-cli/releases) when one is attached, and put it on the
+Gateway's `PATH` (or set `gcBinary`). The Docker image built from `sctg-claw` already ships `gc`.
 
 ## Install
 
 ```bash
-openclaw plugins install npm:@sctg/openclaw-coach
+openclaw plugins install clawhub:@sctg/openclaw-coach
 ```
+
+The same package is also published on npm (`openclaw plugins install npm:@sctg/openclaw-coach`).
+
+## Sign in to Garmin
+
+The coach reads Garmin Connect with a token file. Create it once, in the environment the Gateway runs in. The
+token refreshes itself afterwards; you only repeat this if Garmin revokes the session.
+
+1. **Choose where the token file lives.** By default it is `$GARMINTOKENS` or
+   `~/.config/garmin-cli/tokens/garmin_tokens.json`. In a container, point it at a path on a persistent volume
+   (for example under `~/.openclaw`), set the variable for the Gateway and, if you want, the `garminTokenFile`
+   plugin option to the same path, or the sign-in is lost at the next restart.
+2. **Sign in with `garmin-ts`**, passing the credentials through the environment (a password on the command line
+   ends up in the shell history):
+
+   ```bash
+   # Anywhere with Node.js 22+, no install needed:
+   GARMIN_LOGIN='you@example.com' GARMIN_PASSWORD='...' npx -p @sctg/garmin-ts-client garmin-ts login
+
+   # Or, in the Gateway, with the copy the plugin installed:
+   cd ~/.openclaw/extensions/coach
+   GARMIN_LOGIN='you@example.com' GARMIN_PASSWORD='...' node_modules/.bin/garmin-ts login
+   ```
+
+   If the account uses multi-factor authentication, Garmin sends a code by email or SMS: type it when asked, or
+   pass it with `--mfa-code 123456` (or `GARMIN_MFA_CODE`) in a script.
+3. **If Garmin refuses the native sign-in** (HTTP 403 or 429, "bot challenge", often from a datacentre or a
+   shared address), sign in with `gc` from another machine and copy the token file over:
+
+   ```bash
+   gc login --email you@example.com --wait-mfa    # asks for the password and the code
+   # then copy ~/.config/garmin-cli/tokens/garmin_tokens.json to the Gateway's token file path
+   # (or: gc export-token, then on the Gateway: gc login --manual --token-blob '<blob>')
+   ```
+
+   Treat the token file and the blob like a password: they give full access to the account until they expire.
+4. **Check it:** `garmin-ts token-info` (expiry and refresh ability, never the token) and
+   `garmin-ts metrics anchors` (prints your profile anchors, or an auth error).
 
 ## Set up
 
-1. Check that `gc status` succeeds in the Gateway's environment.
+1. Check that the sign-in works: `garmin-ts token-info` in the Gateway's environment (or `gc status` if you use `gc`).
 2. Configure the athlete's anchors (see Configuration). At least `timezone`, `sex` and a measured `hrMax`.
 3. Ask the coach to run `coach_data_status` with `sync: true`: it fetches 90 days of recovery signals and
    180 days of activities (about 25 Garmin requests), and says what is missing.
@@ -128,7 +183,7 @@ Version 1's `coach_garmin_digest` is gone: replace it with `coach_daily_briefing
 
 | Key | Default | Description |
 |---|---|---|
-| `garminBackend` | `auto` | `native`: fetch in the Gateway process with [`@sctg/garmin-ts-client`](https://github.com/sctg-development/garmin-ts-client); `gc`: the garmin-cli binary; `auto`: native when the package and a token file are present, else gc. Creating workouts always uses `gc`. |
+| `garminBackend` | `auto` | `native`: fetch in the Gateway process with [`@sctg/garmin-ts-client`](https://github.com/sctg-development/garmin-ts-client); `gc`: the garmin-cli binary; `auto`: native when the package and a token file are present, else gc. Creating workouts still uses `gc`. |
 | `garminTokenFile` | `$GARMINTOKENS` or `~/.config/garmin-cli/tokens/garmin_tokens.json` | Token file of the native backend (the file `gc login` or `garmin-ts login` writes). |
 | `gcBinary` | `gc` | Path to the garmin-cli binary. |
 | `timezone` | Gateway timezone | IANA timezone of the athlete (day boundaries). |
@@ -357,6 +412,13 @@ gc daily yesterday --keys
 
 `.github/workflows/publish.yml` publishes to npm when a GitHub Release is published. It checks that
 `package.json`'s version matches the release tag (`vX.Y.Z`).
+
+To publish on the OpenClaw marketplace (ClawHub), once the version is bumped and the dependencies it needs are
+available on npm (npm runs a security check of a few minutes before serving a new version):
+
+```bash
+npm i && bun i && bun run build && bunx clawhub package publish .
+```
 
 ## License
 
