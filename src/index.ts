@@ -1,6 +1,7 @@
 import { Type, type TSchema } from "typebox";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { parseConfig } from "./config.ts";
+import { MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { createGarminRunner } from "./garmin/backend.ts";
 import {
   ToolInputError,
@@ -132,7 +133,7 @@ const TOOLS: Tool[] = [
       "coach_journal_insights can compare. Only record what the athlete actually said.",
     parameters: Type.Object({
       date: DateParam,
-      tags: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Boolean(), Type.Number({ minimum: 0 })]))),
+      tags: Type.Optional(Type.Record(Type.String({ maxLength: 60 }), Type.Union([Type.Boolean(), Type.Number({ minimum: 0 })]), { maxProperties: MAX_TAGS_PER_ENTRY })),
       rpe: Type.Optional(Type.Number({ minimum: 0, maximum: 10, description: "Session rating of perceived exertion (CR-10)." })),
       fatigue: Rating("Fatigue"),
       soreness: Rating("Muscle soreness"),

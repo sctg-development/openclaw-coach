@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addDays, dateRange } from "../src/dates.ts";
+import { MAX_ANALYSED_TAGS } from "../src/limits.ts";
 import { habitAssociations } from "../src/science/associations.ts";
 import { analyzeHrv } from "../src/science/hrv.ts";
 import { analyzeLoad, banisterPerMinute, dailyLoads, fitnessFatigue, intensityDistribution, plannedSessionLoad, projectLoads, sessionLoad } from "../src/science/load.ts";
@@ -343,6 +344,20 @@ test("a habit followed by lower HRV is reported as a consistent difference, a ra
   assert.equal(alcohol?.nightsWith, 20);
   assert.equal(find("coin_flip", "overnight HRV")?.reading, "no clear difference");
   assert.ok(report.caveats[0].includes("does not show"));
+});
+
+test("the number of analysed habits is capped, keeping the best balanced ones, within a bounded time", () => {
+  const dates = dateRange(addDays(TODAY, -59), addDays(TODAY, -1));
+  const random = seededRandom(3);
+  // 150 qualifying habits on 59 nights: far beyond what anyone logs, to check the cost stays bounded.
+  const journal: JournalEntry[] = dates.map((date) => ({ date, tags: Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`tag_${String(i).padStart(3, "0")}`, random() < 0.5])), updatedAt: "" }));
+  const started = Date.now();
+  const report = habitAssociations(makeHistory(60), journal);
+  assert.ok(Date.now() - started < 20_000, "bounded computation");
+  assert.equal(new Set(report.associations.map((item) => item.tag)).size, MAX_ANALYSED_TAGS);
+  assert.equal(report.skipped.length, 150 - MAX_ANALYSED_TAGS);
+  assert.ok(report.caveats.some((line) => line.includes("only the")));
+  assert.deepEqual(report.associations.map((item) => item.tag), [...report.associations.map((item) => item.tag)].sort());
 });
 
 test("habits logged too rarely are listed as insufficient instead of compared", () => {

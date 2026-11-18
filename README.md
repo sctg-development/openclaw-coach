@@ -115,8 +115,8 @@ configuration: the files are for the coach, the configuration is for the models.
 | `coach_activity_deep_dive` | One activity: laps, grade-adjusted pace, decoupling, heat | — |
 | `coach_zones_and_paces` | Heart-rate zones, VDOT paces, race equivalences | — |
 | `coach_strength_analysis` | One strength session: volume, estimated 1RM | — |
-| `coach_journal_log` | Subjective check-in, symptoms, habits | local journal |
-| `coach_journal_insights` | Associations between habits and the following night | — |
+| `coach_journal_log` | Subjective check-in, symptoms, habits (at most 24 tags per day and 60 distinct tags overall) | local journal |
+| `coach_journal_insights` | Associations between habits and the following night (at most 20 habits compared per call; the rest are listed as `skipped`) | — |
 | `coach_briefing_email` | Build the whole daily e-mail (subject, HTML, text, inline images), ready for any mail tool | PNG files in `dataDir/charts` |
 | `coach_briefing_charts` | Render the day's figures as PNG images (gauge, ceiling, signals, HRV, load, sleep) for an email | PNG files in `dataDir/charts` |
 | `coach_workout_push` | Create a workout in Garmin Connect (preview, then explicit confirmation) | **Garmin Connect** |

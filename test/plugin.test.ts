@@ -11,6 +11,7 @@ import { createGarminRunner } from "../src/garmin/backend.ts";
 import { isNativeCommand, nativeRunner, type NativeGarmin } from "../src/garmin/native.ts";
 import { renderBriefingEmail } from "../src/email.ts";
 import { loadStore } from "../src/store.ts";
+import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "../src/limits.ts";
 import { ToolInputError, activityDeepDive, briefingCharts, briefingEmail, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
 import { TODAY, makeHistory } from "./helpers.ts";
 
@@ -268,6 +269,28 @@ test("zones and paces use the resolved anchors and a race result", async () => {
     assert.ok(race.vdot > 44 && race.vdot < 46);
     assert.equal(race.predictions.length, 4);
     await assert.rejects(zonesAndPaces(deps, { raceDistanceM: 1000, raceTimeS: 150 }), ToolInputError);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("journal tags are bounded per entry, after merging, and across the retained history", async () => {
+  const { deps, cleanup } = await setup();
+  try {
+    const many = (prefix: string, count: number) => Object.fromEntries(Array.from({ length: count }, (_, i) => [`${prefix}${i}`, true]));
+    // One oversized call is refused before any work is done.
+    await assert.rejects(journalLog(deps, { tags: many("a", MAX_TAGS_PER_ENTRY + 1) }), ToolInputError);
+    // Repeated small calls cannot grow one entry past the limit either.
+    await journalLog(deps, { tags: many("a", MAX_TAGS_PER_ENTRY) });
+    await assert.rejects(journalLog(deps, { tags: { one_more: true } }), ToolInputError);
+    // Distinct tags across days are bounded too: fill the history, then a new tag is refused.
+    let day = 1;
+    for (let used = MAX_TAGS_PER_ENTRY; used < MAX_DISTINCT_TAGS; used += MAX_TAGS_PER_ENTRY) {
+      await journalLog(deps, { date: addDays(TODAY, -day++), tags: many(`d${day}_`, Math.min(MAX_TAGS_PER_ENTRY, MAX_DISTINCT_TAGS - used)) });
+    }
+    await assert.rejects(journalLog(deps, { date: addDays(TODAY, -day), tags: { brand_new: true } }), ToolInputError);
+    // Re-using a known tag name is still fine.
+    await journalLog(deps, { date: addDays(TODAY, -day), tags: { a0: false } });
   } finally {
     await cleanup();
   }

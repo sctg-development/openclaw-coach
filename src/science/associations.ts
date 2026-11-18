@@ -12,6 +12,7 @@
  */
 
 import { addDays } from "../dates.ts";
+import { MAX_ANALYSED_TAGS } from "../limits.ts";
 import type { AlgorithmTag, DayRecord, JournalEntry } from "../types.ts";
 import { lnRmssd } from "./hrv.ts";
 import { benjaminiHochberg, bootstrapDiffCi, hedgesG, isNum, mean, permutationP, round } from "./stats.ts";
@@ -57,6 +58,8 @@ export type AssociationReport = {
   associations: Association[];
   /** Tags logged too rarely (or too often) to compare. */
   insufficient: Array<{ tag: string; daysWith: number; daysWithout: number }>;
+  /** Tags that qualified but were left out because more than MAX_ANALYSED_TAGS qualified (least balanced first). */
+  skipped: string[];
   caveats: string[];
 };
 
@@ -75,15 +78,21 @@ export function habitAssociations(days: readonly DayRecord[], journal: readonly 
 
   const associations: Association[] = [];
   const insufficient: AssociationReport["insufficient"] = [];
+  // First pass (cheap): split the tags into "too rare to compare" and "qualifying". A day counts as
+  // "without" only if the journal was filled that day: an absent entry is unknown, not "no".
+  const qualifying: Array<{ tag: string; withDays: JournalEntry[]; withoutDays: JournalEntry[] }> = [];
   for (const tag of tags) {
-    // A day counts as "without" only if the journal was filled that day: an
-    // absent entry is unknown, not "no".
     const withDays = logged.filter((entry) => isOn(entry.tags[tag]));
     const withoutDays = logged.filter((entry) => !isOn(entry.tags[tag]));
-    if (withDays.length < MIN_GROUP_SIZE || withoutDays.length < MIN_GROUP_SIZE) {
-      insufficient.push({ tag, daysWith: withDays.length, daysWithout: withoutDays.length });
-      continue;
-    }
+    if (withDays.length < MIN_GROUP_SIZE || withoutDays.length < MIN_GROUP_SIZE) insufficient.push({ tag, daysWith: withDays.length, daysWithout: withoutDays.length });
+    else qualifying.push({ tag, withDays, withoutDays });
+  }
+  // Bound the expensive part: keep the tags whose smaller group is largest (ties: alphabetical), then
+  // analyse them in alphabetical order so the output order does not depend on the ranking.
+  const ranked = [...qualifying].sort((x, y) => Math.min(y.withDays.length, y.withoutDays.length) - Math.min(x.withDays.length, x.withoutDays.length) || x.tag.localeCompare(y.tag));
+  const kept = new Set(ranked.slice(0, MAX_ANALYSED_TAGS).map((item) => item.tag));
+  const skipped = ranked.slice(MAX_ANALYSED_TAGS).map((item) => item.tag).sort();
+  for (const { tag, withDays, withoutDays } of qualifying.filter((item) => kept.has(item.tag))) {
     for (const outcome of OUTCOMES) {
       const values = (entries: readonly JournalEntry[]) =>
         entries.map((entry) => outcome.get(byDate.get(addDays(entry.date, 1)) as DayRecord)).filter(isNum);
@@ -127,10 +136,12 @@ export function habitAssociations(days: readonly DayRecord[], journal: readonly 
     algorithm: ASSOCIATION_ALGORITHM,
     associations,
     insufficient,
+    skipped,
     caveats: [
       "Observed association in uncontrolled personal data: it does not show that the habit causes the difference.",
       "Habits cluster with weekdays, training and each other; a difference can come from what accompanies the habit.",
       `Comparisons need at least ${MIN_GROUP_SIZE} nights in each group; more nights give narrower intervals.`,
+      ...(skipped.length ? [`${skipped.length} more habit(s) qualified but only the ${MAX_ANALYSED_TAGS} best balanced were compared: ${skipped.join(", ")}.`] : []),
     ],
   };
 }

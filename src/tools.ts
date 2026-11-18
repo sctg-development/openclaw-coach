@@ -16,6 +16,7 @@ import { defaultHeadline, renderBriefingEmail, type EmailSession } from "./email
 import type { GcRunner } from "./garmin/gc.ts";
 import { garminDaySignals, normalizeActivity, normalizeSplits } from "./garmin/normalize.ts";
 import { resolveProfile } from "./profile.ts";
+import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { habitAssociations } from "./science/associations.ts";
 import { healthspanMarkers } from "./science/healthspan.ts";
 import { analyzeHrv, lnRmssd } from "./science/hrv.ts";
@@ -526,6 +527,7 @@ export async function strengthAnalysis(deps: Deps, params: { activityId?: unknow
 // --- coach_journal_log / coach_journal_insights ---------------------------------------------------
 
 const TAG = /^[a-z0-9][a-z0-9_]{0,39}$/;
+// Bounds on journal tags: see limits.ts for why they exist.
 
 export type JournalInput = {
   date?: unknown;
@@ -545,7 +547,10 @@ export async function journalLog(deps: Deps, params: JournalInput) {
   const today = todayIn(deps.config.timezone, now);
   const date = resolveDate(params.date, today);
   const tags: Record<string, boolean | number> = {};
-  for (const [rawKey, value] of Object.entries(params.tags ?? {})) {
+  const incoming = Object.entries(params.tags ?? {});
+  // Refuse oversized input before doing any work on it.
+  if (incoming.length > MAX_TAGS_PER_ENTRY) throw new ToolInputError(`At most ${MAX_TAGS_PER_ENTRY} tags per entry (got ${incoming.length}).`);
+  for (const [rawKey, value] of incoming) {
     const key = rawKey.trim().toLowerCase().replace(/[\s-]+/g, "_");
     if (!TAG.test(key)) throw new ToolInputError(`Invalid tag name "${rawKey}": use letters, digits and underscores.`);
     if (typeof value === "boolean" || (isNum(value) && value >= 0)) tags[key] = value;
@@ -561,10 +566,17 @@ export async function journalLog(deps: Deps, params: JournalInput) {
   return exclusive(async () => {
     const store = await loadStore(deps.config.dataDir);
     const previous = store.journal[date];
+    // The merged entry and the distinct tags of the retained history stay bounded, so the insights
+    // analysis (synchronous resampling per tag) cannot be made arbitrarily expensive by repeated calls.
+    const mergedTags = { ...previous?.tags, ...tags };
+    if (Object.keys(mergedTags).length > MAX_TAGS_PER_ENTRY) throw new ToolInputError(`That entry would hold more than ${MAX_TAGS_PER_ENTRY} tags: reuse existing tag names.`);
+    const known = new Set(Object.values(store.journal).flatMap((item) => Object.keys(item.tags)));
+    const added = Object.keys(tags).filter((key) => !known.has(key));
+    if (known.size + added.length > MAX_DISTINCT_TAGS) throw new ToolInputError(`The journal already tracks ${known.size} distinct tags (limit ${MAX_DISTINCT_TAGS}): reuse existing tag names.`);
     const entry: JournalEntry = {
       ...previous,
       date,
-      tags: { ...previous?.tags, ...tags },
+      tags: mergedTags,
       updatedAt: now.toISOString(),
     };
     const set = <K extends keyof JournalEntry>(key: K, value: JournalEntry[K] | undefined) => {
