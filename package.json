@@ -1,6 +1,6 @@
 {
   "name": "@sctg/openclaw-coach",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "AI endurance and recovery coach plugin for OpenClaw: documented physiological models (HRV baseline, recovery, sleep, training load, early warning) computed on Garmin Connect data via garmin-cli, with a coaching skill.",
   "icon": "assets/logo.png",
   "type": "module",
@@ -31,10 +31,10 @@
   },
   "dependencies": {
     "@resvg/resvg-js": "2.6.2",
-    "typebox": "1.3.17"
+    "typebox": "1.3.17",
+    "@sctg/garmin-ts-client": "^0.2.0"
   },
   "optionalDependencies": {
-    "@sctg/garmin-ts-client": "^0.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",
