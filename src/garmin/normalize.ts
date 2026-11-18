@@ -138,3 +138,99 @@ export function garminDaySignals(readiness: unknown, status: unknown): Json {
   }
   return out;
 }
+
+/** Category names of Garmin's load balance, in the order the app shows them. */
+const LOAD_CATEGORIES = [
+  ["aerobicLow", "monthlyLoadAerobicLow"],
+  ["aerobicHigh", "monthlyLoadAerobicHigh"],
+  ["anaerobic", "monthlyLoadAnaerobic"],
+] as const;
+
+/**
+ * Garmin's 30-day training load balance, reduced to each category's load, its target range and where the load
+ * stands against it. Returns null when the payload has no device entry. The comparison is Garmin's own target
+ * (a proprietary model), reported as such by the caller.
+ */
+export function loadBalanceSignal(payload: unknown): Json | null {
+  const map = obj(obj(payload)?.metricsTrainingLoadBalanceDTOMap);
+  const entries = map ? Object.values(map).map(obj).filter((entry): entry is Json => entry !== null) : [];
+  // Several devices can report: the primary training device is the one the app displays.
+  const entry = entries.find((item) => item.primaryTrainingDevice === true) ?? entries[0];
+  if (!entry) return null;
+  const categories: Json = {};
+  for (const [name, prefix] of LOAD_CATEGORIES) {
+    const load = num(entry, prefix);
+    const min = num(entry, `${prefix}TargetMin`);
+    const max = num(entry, `${prefix}TargetMax`);
+    if (load === null) continue;
+    const status = min === null || max === null ? null : load < min ? "below" : load > max ? "above" : "within";
+    categories[name] = { load: Math.round(load), targetMin: min === null ? null : Math.round(min), targetMax: max === null ? null : Math.round(max), status };
+  }
+  if (Object.keys(categories).length === 0) return null;
+  return { date: entry.calendarDate ?? null, window: "rolling 30 days", categories, phrase: entry.trainingBalanceFeedbackPhrase ?? null };
+}
+
+/** Below this many days with data, the coach cannot yet describe the athlete's VO2 max trend from its own history. */
+export const VO2_TREND_BELOW_DAYS = 56;
+/** Altitude from which acclimation matters (metres), and how far from the usual altitude counts as "outside the usual zone". */
+export const ACCLIMATION_ALTITUDE_FLOOR_M = 1000;
+export const ACCLIMATION_ALTITUDE_SHIFT_M = 500;
+/** Heat acclimation is reported while it is being built (1-99 %) or when it moved by at least this many points. */
+export const ACCLIMATION_HEAT_MOVE_POINTS = 5;
+
+const median = (values: number[]): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? (sorted[middle] as number) : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+};
+
+/**
+ * VO2 max trend and heat/altitude acclimation from Garmin's `maxmet` history, each only when it is useful:
+ *
+ * - `vo2maxTrend` only while the coach has fewer than VO2_TREND_BELOW_DAYS days of its own data
+ *   (`daysOfOwnData`): later, its own HRV, load and recovery series say more than a slow VO2 max drift.
+ * - `acclimation` only when the athlete is at altitude (>= 1000 m) or far from their usual altitude (the median
+ *   of the window), or when heat acclimation is being built or has just moved. Otherwise it is noise.
+ *
+ * Returns an empty object when nothing qualifies, so the caller can spread it.
+ */
+export function maxmetSignals(payload: unknown, daysOfOwnData: number): Json {
+  const series = (Array.isArray(payload) ? payload : []).map(obj).filter((entry): entry is Json => entry !== null);
+  const out: Json = {};
+  const points = series
+    .map((entry) => {
+      const generic = obj(entry.generic);
+      const value = num(generic, "vo2MaxPreciseValue", "vo2MaxValue");
+      return value !== null && typeof generic?.calendarDate === "string" ? { date: generic.calendarDate, value } : null;
+    })
+    .filter((point): point is { date: string; value: number } => point !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (daysOfOwnData < VO2_TREND_BELOW_DAYS && points.length >= 2) {
+    const first = points[0] as { date: string; value: number };
+    const last = points[points.length - 1] as { date: string; value: number };
+    out.vo2maxTrend = { from: first.date, to: last.date, first: Math.round(first.value * 10) / 10, last: Math.round(last.value * 10) / 10, change: Math.round((last.value - first.value) * 10) / 10, points: points.length };
+  }
+  const blocks = series.map((entry) => obj(entry.heatAltitudeAcclimation)).filter((block): block is Json => block !== null).sort((a, b) => String(a.calendarDate).localeCompare(String(b.calendarDate)));
+  const latest = blocks[blocks.length - 1];
+  if (latest) {
+    const altitude = num(latest, "currentAltitude");
+    const usual = median(blocks.map((block) => num(block, "currentAltitude")).filter((value): value is number => value !== null));
+    const heat = num(latest, "heatAcclimationPercentage");
+    const heatBefore = num(latest, "previousHeatAcclimationPercentage");
+    const highUp = altitude !== null && altitude >= ACCLIMATION_ALTITUDE_FLOOR_M;
+    const awayFromUsual = altitude !== null && usual !== null && Math.abs(altitude - usual) >= ACCLIMATION_ALTITUDE_SHIFT_M;
+    const heatActive = heat !== null && ((heat > 0 && heat < 100) || (heatBefore !== null && Math.abs(heat - heatBefore) >= ACCLIMATION_HEAT_MOVE_POINTS));
+    if (highUp || awayFromUsual || heatActive) {
+      out.acclimation = {
+        date: latest.calendarDate ?? null,
+        altitudeM: altitude === null ? null : Math.round(altitude),
+        usualAltitudeM: usual === null ? null : Math.round(usual),
+        altitudeAcclimationPercent: num(latest, "altitudeAcclimation"),
+        heatAcclimationPercent: heat,
+        reason: [highUp ? "at altitude" : null, awayFromUsual && !highUp ? "away from the usual altitude" : null, heatActive ? "heat acclimation in progress" : null].filter(Boolean).join(", "),
+      };
+    }
+  }
+  return out;
+}

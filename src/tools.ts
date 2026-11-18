@@ -14,7 +14,7 @@ import type { CoachConfig } from "./config.ts";
 import { addDays, dateRange, isIsoDate, todayIn, weekStart } from "./dates.ts";
 import { defaultHeadline, renderBriefingEmail, type EmailSession } from "./email.ts";
 import type { GcRunner } from "./garmin/gc.ts";
-import { garminDaySignals, normalizeActivity, normalizeSplits } from "./garmin/normalize.ts";
+import { garminDaySignals, hasSignal, loadBalanceSignal, maxmetSignals, normalizeActivity, normalizeSplits } from "./garmin/normalize.ts";
 import { resolveProfile } from "./profile.ts";
 import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { habitAssociations } from "./science/associations.ts";
@@ -180,11 +180,17 @@ export async function dailyBriefing(deps: Deps, params: { date?: unknown; sync?:
   const load = analyzeLoad(loads, activities, profile);
   const readiness = decideReadiness({ hrv, recovery, warning, sleep, load, journal });
 
-  const [readinessResult, statusResult] = await Promise.all([
+  const [readinessResult, statusResult, balanceResult, maxmetResult] = await Promise.all([
     deps.gc(["metrics", "training-readiness", date]),
     deps.gc(["metrics", "training-status", date]),
+    // The two below exist only in the native client; with `gc` alone they come back unsupported and are left out.
+    deps.gc(["metrics", "load-balance", date]),
+    deps.gc(["metrics", "maxmet", "--start", addDays(date, -60), "--end", date]),
   ]);
   const garmin = garminDaySignals(readinessResult.ok ? readinessResult.data : null, statusResult.ok ? statusResult.data : null);
+  const loadBalance = balanceResult.ok ? loadBalanceSignal(balanceResult.data) : null;
+  const ownDays = Object.values(store.days).filter(hasSignal).length;
+  const maxmet = maxmetResult.ok ? maxmetSignals(maxmetResult.data, ownDays) : {};
 
   const yesterday = addDays(date, -1);
   return {
@@ -199,6 +205,8 @@ export async function dailyBriefing(deps: Deps, params: { date?: unknown; sync?:
     load: { ...load, intensity28: load.intensity28 },
     garmin: {
       ...garmin,
+      ...(loadBalance ? { loadBalance } : {}),
+      ...maxmet,
       hrvStatus: today?.hrv?.status ?? null,
       bodyBattery: today?.bodyBattery ?? null,
       stress: today?.stress ? { avg: today.stress.avg, max: today.stress.max } : null,

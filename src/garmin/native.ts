@@ -13,6 +13,10 @@ export interface NativeGarmin {
   lactateThreshold(): Promise<unknown>;
   /** Lactate-threshold heart rate, FTP and VO2 max (`gc metrics anchors`). Absent in older versions of the package. */
   anchors?(): Promise<unknown>;
+  /** Rolling 30-day load split with Garmin's target ranges (`metrics load-balance`). Absent before garmin-ts-client 0.3.2. */
+  loadBalance?(date: string): Promise<unknown>;
+  /** VO2 max history with the heat/altitude acclimation block (`metrics maxmet`). Absent before garmin-ts-client 0.3.2. */
+  maxmet?(start: string, end: string): Promise<unknown>;
 }
 
 export type ActivityView = "splits" | "hr-zones" | "weather" | "exercise-sets";
@@ -36,7 +40,7 @@ function flags(args: string[]): { positional: string[]; values: Map<string, stri
 export function isNativeCommand(args: string[]): boolean {
   const [command, sub] = args;
   if (command === "daily" || command === "activities") return command === "daily" || !sub || sub.startsWith("--") || ACTIVITY_VIEWS.includes(sub);
-  return command === "metrics" && (sub === "training-readiness" || sub === "training-status" || sub === "lactate-threshold" || sub === "anchors");
+  return command === "metrics" && (sub === "training-readiness" || sub === "training-status" || sub === "lactate-threshold" || sub === "anchors" || sub === "load-balance" || sub === "maxmet");
 }
 
 function code(error: unknown): GcErrorCode {
@@ -66,6 +70,14 @@ export function nativeRunner(api: NativeGarmin): GcRunner {
         data = await api.activities({ start, end: values.get("--end") });
       } else if (positional[0] === "lactate-threshold") {
         data = await api.lactateThreshold();
+      } else if (positional[0] === "maxmet") {
+        const [start, end] = [values.get("--start"), values.get("--end")];
+        if (!api.maxmet || !start || !end || !DATE.test(start) || !DATE.test(end)) return gcFailure("unsupported");
+        data = await api.maxmet(start, end);
+      } else if (positional[0] === "load-balance") {
+        const date = positional[1];
+        if (!api.loadBalance || !date || !DATE.test(date)) return gcFailure("unsupported");
+        data = await api.loadBalance(date);
       } else if (positional[0] === "anchors") {
         if (!api.anchors) return gcFailure("unsupported");
         data = await api.anchors();
@@ -105,5 +117,7 @@ export async function loadNative(tokenFile: string | null, moduleName = "@sctg/g
     metric: (name, date) => call(name === "training-readiness" ? "trainingReadiness" : "trainingStatus", date),
     lactateThreshold: () => call("lactateThreshold"),
     ...(typeof mod.anchors === "function" ? { anchors: () => call("anchors") } : {}),
+    ...(typeof mod.trainingLoadBalance === "function" ? { loadBalance: (date: string) => call("trainingLoadBalance", date) } : {}),
+    ...(typeof mod.maxMet === "function" ? { maxmet: (start: string, end: string) => call("maxMet", start, end) } : {}),
   };
 }

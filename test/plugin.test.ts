@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { parseConfig, type CoachConfig } from "../src/config.ts";
 import { addDays, clockMinutes, dateRange, daysBetween, isIsoDate, todayIn, weekStart } from "../src/dates.ts";
 import { classifyGcError, type GcResult, type GcRunner } from "../src/garmin/gc.ts";
-import { garminDaySignals, lthrFromPayload, normalizeActivity, normalizeSplits, parseDailyExport } from "../src/garmin/normalize.ts";
+import { VO2_TREND_BELOW_DAYS, garminDaySignals, loadBalanceSignal, lthrFromPayload, maxmetSignals, normalizeActivity, normalizeSplits, parseDailyExport } from "../src/garmin/normalize.ts";
 import { createGarminRunner } from "../src/garmin/backend.ts";
 import { isNativeCommand, nativeRunner, type NativeGarmin } from "../src/garmin/native.ts";
 import { renderBriefingEmail } from "../src/email.ts";
@@ -564,4 +564,63 @@ test("configuration accepts only known backends", () => {
   assert.equal(parseConfig({ garminBackend: "gc" }).garminBackend, "gc");
   assert.equal(parseConfig({ garminBackend: "other" }).garminBackend, "auto");
   assert.equal(parseConfig({ garminTokenFile: " /x/t.json " }).garminTokenFile, "/x/t.json");
+});
+
+// --- load balance, VO2 max trend and acclimation ----------------------------------------------------
+
+const balancePayload = (aerobicLow: number) => ({
+  metricsTrainingLoadBalanceDTOMap: {
+    "1": { calendarDate: "2026-11-17", primaryTrainingDevice: false, monthlyLoadAerobicLow: 1, monthlyLoadAerobicHigh: 1, monthlyLoadAnaerobic: 1 },
+    "2": {
+      calendarDate: "2026-11-17", primaryTrainingDevice: true, trainingBalanceFeedbackPhrase: "AEROBIC_LOW_SHORTAGE",
+      monthlyLoadAerobicLow: aerobicLow, monthlyLoadAerobicLowTargetMin: 200, monthlyLoadAerobicLowTargetMax: 400,
+      monthlyLoadAerobicHigh: 300, monthlyLoadAerobicHighTargetMin: 200, monthlyLoadAerobicHighTargetMax: 400,
+      monthlyLoadAnaerobic: 900, monthlyLoadAnaerobicTargetMin: 0, monthlyLoadAnaerobicTargetMax: 100,
+    },
+  },
+});
+
+test("the load balance reads the primary device and says where each category stands against Garmin's target", () => {
+  const signal = loadBalanceSignal(balancePayload(115)) as { categories: Record<string, { load: number; status: string }>; phrase: string; date: string };
+  assert.deepEqual(Object.fromEntries(Object.entries(signal.categories).map(([name, item]) => [name, [item.load, item.status]])), { aerobicLow: [115, "below"], aerobicHigh: [300, "within"], anaerobic: [900, "above"] });
+  assert.equal(signal.phrase, "AEROBIC_LOW_SHORTAGE");
+  assert.equal(loadBalanceSignal({}), null);
+  assert.equal(loadBalanceSignal({ metricsTrainingLoadBalanceDTOMap: { "1": { calendarDate: "2026-11-17" } } }), null);
+});
+
+const maxmetPoint = (date: string, vo2: number, altitude: number, heat = 0, heatBefore = 0) => ({
+  generic: { calendarDate: date, vo2MaxPreciseValue: vo2 },
+  heatAltitudeAcclimation: { calendarDate: date, currentAltitude: altitude, altitudeAcclimation: 0, heatAcclimationPercentage: heat, previousHeatAcclimationPercentage: heatBefore },
+});
+
+test("the VO2 max trend only appears while the coach has little data of its own", () => {
+  const series = [maxmetPoint("2026-10-01", 50.0, 20), maxmetPoint("2026-11-01", 51.0, 25), maxmetPoint("2026-11-16", 51.4, 20)];
+  const early = maxmetSignals(series, 20) as { vo2maxTrend?: { change: number; points: number } };
+  assert.equal(early.vo2maxTrend?.change, 1.4);
+  assert.equal(early.vo2maxTrend?.points, 3);
+  assert.equal("vo2maxTrend" in maxmetSignals(series, VO2_TREND_BELOW_DAYS), false);
+  assert.equal("vo2maxTrend" in maxmetSignals([maxmetPoint("2026-11-16", 51, 20)], 5), false);
+});
+
+test("acclimation is reported only at altitude, away from the usual altitude, or while heat is being built", () => {
+  const home = (altitude: number) => [maxmetPoint("2026-11-10", 50, 20), maxmetPoint("2026-11-13", 50, 25), maxmetPoint("2026-11-16", 50, altitude)];
+  assert.equal("acclimation" in maxmetSignals(home(30), 99), false);
+  assert.equal((maxmetSignals(home(1800), 99) as { acclimation: { reason: string } }).acclimation.reason, "at altitude");
+  assert.equal((maxmetSignals(home(650), 99) as { acclimation: { reason: string } }).acclimation.reason, "away from the usual altitude");
+  const warm = [maxmetPoint("2026-11-10", 50, 20), maxmetPoint("2026-11-16", 50, 20, 40, 30)];
+  assert.equal((maxmetSignals(warm, 99) as { acclimation: { reason: string } }).acclimation.reason, "heat acclimation in progress");
+  assert.equal("acclimation" in maxmetSignals([maxmetPoint("2026-11-16", 50, 20, 100, 100)], 99), false);
+});
+
+test("the native runner serves load balance and VO2 max history, and reports unsupported when the package is older", async () => {
+  const calls: string[] = [];
+  const api = { daily: async () => null, activities: async () => null, activity: async () => null, metric: async () => null, lactateThreshold: async () => null, loadBalance: async (date: string) => (calls.push(`lb ${date}`), { ok: 1 }), maxmet: async (a: string, b: string) => (calls.push(`mm ${a} ${b}`), []) } as NativeGarmin;
+  assert.equal(isNativeCommand(["metrics", "load-balance", "2026-11-17"]), true);
+  assert.deepEqual(await nativeRunner(api)(["metrics", "load-balance", "2026-11-17"]), { ok: true, data: { ok: 1 } });
+  assert.deepEqual(await nativeRunner(api)(["metrics", "maxmet", "--start", "2026-09-18", "--end", "2026-11-17"]), { ok: true, data: [] });
+  assert.deepEqual(calls, ["lb 2026-11-17", "mm 2026-09-18 2026-11-17"]);
+  const old = { daily: async () => null, activities: async () => null, activity: async () => null, metric: async () => null, lactateThreshold: async () => null } as NativeGarmin;
+  const result = await nativeRunner(old)(["metrics", "load-balance", "2026-11-17"]);
+  assert.equal(result.ok, false);
+  assert.equal((result as { code: string }).code, "unsupported");
 });

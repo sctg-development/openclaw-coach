@@ -157,6 +157,17 @@ Training readiness, training status, VO2max, body battery and HRV status are Gar
 estimates, shown for comparison. When they disagree with the plugin's models, say both and explain the
 difference (different inputs and windows) instead of picking silently.
 
+Three more fields appear only when the native Garmin client is in use, and only when they matter:
+
+- `loadBalance`: Garmin's rolling 30-day load split (aerobic low, aerobic high, anaerobic) with its target range
+  for each and where the athlete stands (`below`, `within`, `above`). Use it to shape the next sessions (for
+  example, a shortage of aerobic low load means more easy volume), and say it is Garmin's target.
+- `vo2maxTrend`: the VO2max change over the last 60 days. It is present only while the coach has fewer than
+  56 days of its own data; do not build conclusions on a slow VO2max drift once the coach's own series exist.
+- `acclimation`: heat and altitude acclimation. It is present only when the athlete is at altitude (1000 m or
+  more), far from their usual altitude, or while heat acclimation is being built. Mention it for pacing and
+  hydration on those days; otherwise ignore it (it is absent).
+
 ## Workflows
 
 ### Daily check-in
