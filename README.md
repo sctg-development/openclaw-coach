@@ -19,6 +19,7 @@ physiological models in code** and gives the model compact, sourced results to i
 - a daily **training ceiling** (rest / easy / moderate / hard) with the rules behind it;
 - activity analysis (grade-adjusted pace, aerobic decoupling), zones and paces, strength summaries,
   a habit journal with association statistics, long-term health markers.
+<img width="2179" height="995" alt="image" src="https://github.com/user-attachments/assets/5f6232bb-957f-41df-9205-d353ce7c0cb7" />
 
 Every formula, constant, threshold, level of evidence and limit is in
 [`docs/SCIENCE.md`](docs/SCIENCE.md) (written for review by sport-science and medical teams,
