@@ -231,12 +231,15 @@ export function renderBriefingEmail(input: EmailInput): BriefingEmail {
     rows.push(`<tr><td style="padding:16px 10px 0 10px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cell(gauge)}${cell(ceiling)}</tr></table></td></tr>`);
   }
   if (input.why.length) rows.push(heading(colon(input.lang, t.why)), bullets(input.why));
-  rows.push(imageRow(chart("signals")), imageRow(chart("hrv_trend")), imageRow(chart("sleep_nights")), imageRow(chart("load_curve")));
+  rows.push(imageRow(chart("signals")), imageRow(chart("hrv_trend")), imageRow(chart("sleep_nights")), imageRow(chart("cardiac_load")), imageRow(chart("muscular_load")), imageRow(chart("intensity")), imageRow(chart("load_curve")));
   if (input.watch.length) rows.push(heading(colon(input.lang, t.watch)), bullets(input.watch));
 
+  // The load statuses and intensity minutes are drawn as charts in the HTML; their lines stay in the plain-text version
+  // (the fourth column) for clients that show no images.
   const columns = summaryColumns(input, t);
-  const th = columns.map((column) => `<td width="33%" valign="top" style="padding:6px 8px;font-size:13px;font-weight:600;color:${TEXT};border:1px solid #d1d5db;background:#f3f4f6">${escapeHtml(column.title)}</td>`).join("");
-  const td = columns.map((column) => `<td width="33%" valign="top" style="padding:6px 8px;font-size:13px;line-height:1.5;color:${TEXT};border:1px solid #d1d5db">${column.lines.map(escapeHtml).join("<br>")}</td>`).join("");
+  const tableColumns = columns.slice(0, 3);
+  const th = tableColumns.map((column) => `<td width="33%" valign="top" style="padding:6px 8px;font-size:13px;font-weight:600;color:${TEXT};border:1px solid #d1d5db;background:#f3f4f6">${escapeHtml(column.title)}</td>`).join("");
+  const td = tableColumns.map((column) => `<td width="33%" valign="top" style="padding:6px 8px;font-size:13px;line-height:1.5;color:${TEXT};border:1px solid #d1d5db">${column.lines.map(escapeHtml).join("<br>")}</td>`).join("");
   rows.push(`<tr><td style="padding:20px 20px 0 20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>${th}</tr><tr>${td}</tr></table></td></tr>`);
   rows.push(`<tr><td align="center" style="padding:24px 20px 28px 20px;font-size:13px;line-height:1.5;color:${MUTED}">${escapeHtml(t.footerFeel)}<br>${escapeHtml(t.footerDisclaimer)}</td></tr>`);
 

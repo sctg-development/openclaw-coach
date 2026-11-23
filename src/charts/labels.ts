@@ -18,6 +18,7 @@ type Strings = {
   trend7: string;
   normalRange: string;
   loadTitle: string;
+  intensity: { title: string; subtitle: string; thisWeek: string; minimum: string };
   loadStatus: { cardiac: string; muscular: string; range: string; value: string; statuses: Record<"calibrating" | "undertraining" | "maintaining" | "optimal" | "productive" | "strained" | "overreaching", string> };
   fitness: string;
   fatigue: string;
@@ -55,6 +56,7 @@ export const LABELS: Record<Lang, Strings> = {
     trend7: "7-day mean",
     normalRange: "Normal range",
     loadTitle: "Fitness, fatigue and form",
+    intensity: { title: "Intensity minutes", subtitle: "Moderate + 2 × vigorous, per week · dashed line = 150 min guideline", thisWeek: "7 days", minimum: "150 min" },
     loadStatus: {
       cardiac: "Cardiac load",
       muscular: "Muscular load",
@@ -95,6 +97,7 @@ export const LABELS: Record<Lang, Strings> = {
     trend7: "Moyenne 7 j",
     normalRange: "Plage normale",
     loadTitle: "Forme physique, fatigue et fraîcheur",
+    intensity: { title: "Minutes d'intensité", subtitle: "Modérées + 2 × vigoureuses, par semaine · pointillé = 150 min recommandées", thisWeek: "7 jours", minimum: "150 min" },
     loadStatus: {
       cardiac: "Charge cardiaque",
       muscular: "Charge musculaire",

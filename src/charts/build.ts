@@ -316,7 +316,7 @@ export function loadStatusChart(input: Common & { kind: "cardiac" | "muscular"; 
   const { theme, lang, kind, daily } = input;
   const t = LABELS[lang];
   const width = 600;
-  const height = 300;
+  const height = 310;
   const plot = { left: 48, right: 566, top: 64, bottom: 244 };
   const title = t.loadStatus[kind];
   const x = scale(0, Math.max(daily.length - 1, 1), plot.left, plot.right);
@@ -341,10 +341,56 @@ export function loadStatusChart(input: Common & { kind: "cardiac" | "muscular"; 
   daily.forEach((d, i) => {
     if ((daily.length - 1 - i) % labelEvery === 0) body += text(x(i), plot.bottom + 18, shortDate(d.date, lang), { size: 11, anchor: "middle", fill: theme.muted });
   });
+  // Legend: the statuses that occur in the window, in the usual order, with their colour.
+  const present = (Object.keys(STATUS_COLORS) as LoadStatus[]).filter((status) => daily.some((d) => d.status === status));
+  let lx = 22;
+  for (const status of present) {
+    const label = t.loadStatus.statuses[status];
+    body += `<circle cx="${lx + 5}" cy="${height - 16}" r="4" fill="${theme.background}" stroke="${STATUS_COLORS[status]}" stroke-width="2.5"/>` + text(lx + 14, height - 12, label, { size: 11, fill: theme.muted });
+    lx += 22 + label.length * 6.2;
+  }
   const last = daily[daily.length - 1];
   const alt = last ? `${title}: ${last.value}, ${t.loadStatus.statuses[last.status]} (${t.loadStatus.range} ${last.low}-${last.high}).` : `${title}: ${t.noData}.`;
   if (last) {
     body += text(plot.right, 46, `${last.value}  ·  ${t.loadStatus.statuses[last.status]}`, { size: 13, weight: 600, anchor: "end", fill: STATUS_COLORS[last.status] });
   }
   return { svg: svgDocument(width, height, theme, title, alt, body), width, height, alt };
+}
+
+// --- Intensity minutes ----------------------------------------------------------------------------
+
+/** Weekly intensity minutes (moderate + 2 x vigorous) as bars, with the 150-minute guideline drawn as a line. */
+export function intensityChart(input: Common & { weeks: Array<{ label: string; value: number | null }>; minimum: number }): Chart {
+  const { theme, lang, weeks, minimum } = input;
+  const t = LABELS[lang];
+  const width = 600;
+  const height = 240;
+  const plot = { left: 48, right: 566, top: 60, bottom: 196 };
+  const max = Math.max(...weeks.map((w) => w.value ?? 0), minimum) * 1.15;
+  const y = scale(0, max, plot.bottom, plot.top);
+  let body = text(20, 28, t.intensity.title, { size: 15, weight: 600, fill: theme.text });
+  body += text(20, 46, t.intensity.subtitle, { size: 11, fill: theme.muted });
+  for (const tick of niceTicks(0, max, 4)) {
+    body += `<line x1="${plot.left}" y1="${n(y(tick))}" x2="${plot.right}" y2="${n(y(tick))}" stroke="${theme.grid}" stroke-width="1"/>`;
+    body += text(plot.left - 8, y(tick), String(Math.round(tick)), { size: 11, anchor: "end", fill: theme.muted, baseline: "middle" });
+  }
+  const slot = (plot.right - plot.left) / Math.max(weeks.length, 1);
+  weeks.forEach((week, i) => {
+    const cx = plot.left + slot * (i + 0.5);
+    const barWidth = Math.min(54, slot * 0.6);
+    if (week.value !== null) {
+      const color = week.value >= minimum ? theme.good : theme.accent;
+      body += `<rect x="${n(cx - barWidth / 2)}" y="${n(y(week.value))}" width="${n(barWidth)}" height="${n(plot.bottom - y(week.value))}" rx="3" fill="${color}" fill-opacity="0.85"/>`;
+      body += text(cx, y(week.value) - 6, String(Math.round(week.value)), { size: 11, weight: 600, anchor: "middle", fill: theme.text });
+    } else {
+      body += text(cx, plot.bottom - 6, "–", { size: 12, anchor: "middle", fill: theme.muted });
+    }
+    body += text(cx, plot.bottom + 18, week.label, { size: 11, anchor: "middle", fill: theme.muted });
+  });
+  body += `<line x1="${plot.left}" y1="${n(y(minimum))}" x2="${plot.right}" y2="${n(y(minimum))}" stroke="${theme.warn}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+  // The label sits in the right margin so that it never covers a bar.
+  body += text(plot.right + 5, y(minimum), String(minimum), { size: 11, weight: 600, fill: theme.warn, baseline: "middle" });
+  const last = weeks[weeks.length - 1];
+  const alt = `${t.intensity.title}: ${last?.value == null ? t.noData : `${Math.round(last.value)} (${t.intensity.thisWeek})`}, ${t.intensity.minimum}.`;
+  return { svg: svgDocument(width, height, theme, t.intensity.title, alt, body), width, height, alt };
 }

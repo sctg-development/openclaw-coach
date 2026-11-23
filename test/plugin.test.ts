@@ -370,7 +370,7 @@ test("briefing charts are rendered as PNG files at twice their display size, wit
   const { deps, dataDir, cleanup } = await setup();
   try {
     const result = await briefingCharts(deps, { lang: "fr" });
-    assert.deepEqual(result.charts.map((chart) => chart.id), ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights", "cardiac_load", "muscular_load"]);
+    assert.deepEqual(result.charts.map((chart) => chart.id), ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights", "cardiac_load", "muscular_load", "intensity"]);
     assert.deepEqual(result.skipped, []);
     for (const chart of result.charts) {
       assert.ok(chart.path.startsWith(path.join(dataDir, "charts", TODAY)));
@@ -426,7 +426,7 @@ test("the briefing e-mail is built in code: subject, html, text and one inline i
   try {
     const result = await briefingEmail(deps, { lang: "fr", headline: "Séance facile <b>aujourd'hui</b>.", why: ["VFC 7 j : 29 ms, ta plage normale : 31-34 ms"] });
     assert.match(result.subject, /^Briefing du dimanche 15 novembre : (Repos|Facile|Modéré|Intense)$/);
-    assert.equal(result.inlineImages.length, 6, "Sunday adds the load curve");
+    assert.equal(result.inlineImages.length, 9, "Sunday adds the load curve to the 8 daily charts");
     for (const image of result.inlineImages) {
       assert.match(image.cid, /^coach-[a-z_]+$/);
       assert.equal(result.bodyHtml.split(`src="cid:${image.cid}"`).length, 2, `${image.cid} is referenced exactly once`);

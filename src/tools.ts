@@ -6,8 +6,8 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { ceilingLadder, hrvChart, loadChart, loadStatusChart, recoveryGauge, signalsChart, sleepChart, type Chart, type HrvPoint, type SleepPoint } from "./charts/build.ts";
-import type { Lang } from "./charts/labels.ts";
+import { ceilingLadder, hrvChart, intensityChart, loadChart, loadStatusChart, recoveryGauge, signalsChart, sleepChart, type Chart, type HrvPoint, type SleepPoint } from "./charts/build.ts";
+import { LABELS, shortDate, type Lang } from "./charts/labels.ts";
 import { renderPng } from "./charts/render.ts";
 import { THEMES, type Theme, type ThemeName } from "./charts/svg.ts";
 import type { CoachConfig } from "./config.ts";
@@ -21,7 +21,7 @@ import { applySkinTemperature } from "./skin.ts";
 import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { habitAssociations } from "./science/associations.ts";
 import { healthspanMarkers } from "./science/healthspan.ts";
-import { intensityMinutes } from "./science/intensity.ts";
+import { WEEKLY_MINIMUM_MIN, intensityMinutes } from "./science/intensity.ts";
 import { loadStatusReport, type LoadStatus } from "./science/loadstatus.ts";
 import { dailyMuscularLoads } from "./science/muscular.ts";
 import { analyzeHrv, lnRmssd } from "./science/hrv.ts";
@@ -770,7 +770,7 @@ export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
 
 // --- coach_briefing_charts ------------------------------------------------------------------------
 
-export const CHART_IDS = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights", "cardiac_load", "muscular_load"] as const;
+export const CHART_IDS = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights", "cardiac_load", "muscular_load", "intensity"] as const;
 export type ChartId = (typeof CHART_IDS)[number];
 
 const CHART_KEEP_DAYS = 14;
@@ -838,6 +838,12 @@ export function chartBuilders(context: Context, common: { theme: Theme; lang: La
       const report = loadStatuses(context).cardiac;
       return report.daily.length < 7 ? "Fewer than 7 days of load history." : loadStatusChart({ ...common, kind: "cardiac", daily: report.daily.slice(-30) });
     },
+    intensity: () => {
+      const report = intensityMinutes(days, context.date);
+      if (report.rolling7.equivalentMin === null && report.previousWeeks.every((week) => week.equivalentMin === null)) return "No intensity minutes recorded in the last weeks.";
+      const weeks = [...report.previousWeeks].reverse().map((week) => ({ label: shortDate(week.weekStart, common.lang), value: week.equivalentMin }));
+      return intensityChart({ ...common, weeks: [...weeks, { label: LABELS[common.lang].intensity.thisWeek, value: report.rolling7.equivalentMin }], minimum: WEEKLY_MINIMUM_MIN });
+    },
     muscular_load: () => {
       const report = loadStatuses(context).muscular;
       return report.daily.length < 7 || report.daily.every((day) => day.value === 0) ? "No muscular load recorded in the load history window." : loadStatusChart({ ...common, kind: "muscular", daily: report.daily.slice(-30) });
@@ -895,7 +901,7 @@ export async function briefingCharts(
 
 // --- coach_briefing_email -------------------------------------------------------------------------
 
-const EMAIL_CHARTS: ChartId[] = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "sleep_nights"];
+const EMAIL_CHARTS: ChartId[] = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "sleep_nights", "cardiac_load", "muscular_load", "intensity"];
 const MAX_LINE = 240;
 
 function textList(value: unknown, name: string, max: number): string[] | undefined {
