@@ -6,6 +6,7 @@
  */
 import { LABELS, type Lang } from "./charts/labels.ts";
 import { THEMES } from "./charts/svg.ts";
+import type { LoadStatus } from "./science/loadstatus.ts";
 import type { Ceiling } from "./science/readiness.ts";
 
 export type EmailChart = { id: string; cid: string; displayWidth: number; alt: string };
@@ -27,7 +28,13 @@ export type EmailInput = {
   /** Sessions of the previous day. */
   sessions: EmailSession[];
   load: { ctl: number | null; atl: number | null; tsb: number | null; weekChangePct: number | null } | null;
+  /** Cardiac and muscular load status (see loadstatus.ts). Optional: older callers omit it. */
+  loadStatus?: { cardiac: LoadStatusLine | null; muscular: LoadStatusLine | null };
+  /** Intensity minutes of the last 7 days (moderate + 2 x vigorous) and their share of the 150-minute guideline. */
+  intensity?: { equivalentMin: number | null; percentOfMinimum: number | null } | null;
 };
+
+export type LoadStatusLine = { value: number; status: LoadStatus; low: number; high: number };
 
 export type BriefingEmail = { subject: string; html: string; text: string };
 
@@ -188,10 +195,21 @@ function summaryColumns(input: EmailInput, t: Strings): Array<{ title: string; l
   }
   if (!loadLines.length) loadLines.push(t.noData);
 
+  const names = LABELS[input.lang].loadStatus;
+  const statusLines: string[] = [];
+  for (const [label, line] of [[names.cardiac, input.loadStatus?.cardiac], [names.muscular, input.loadStatus?.muscular]] as const) {
+    if (line) statusLines.push(`${label}: ${line.value} · ${names.statuses[line.status]} (${names.range.toLowerCase()} ${line.low}-${line.high})`);
+  }
+  if (input.intensity?.equivalentMin != null) {
+    const share = input.intensity.percentOfMinimum != null ? ` (${input.intensity.percentOfMinimum} %)` : "";
+    statusLines.push(`${input.lang === "fr" ? "Minutes d'intensité" : "Intensity minutes"}: ${Math.round(input.intensity.equivalentMin)} / 150${share}`);
+  }
+
   return [
     { title: t.sleep, lines: sleepLines },
     { title: t.yesterday, lines: sessionLines },
     { title: t.load, lines: loadLines },
+    ...(statusLines.length ? [{ title: input.lang === "fr" ? "Charge et intensité" : "Load status", lines: statusLines }] : []),
   ];
 }
 

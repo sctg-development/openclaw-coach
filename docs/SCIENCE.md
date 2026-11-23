@@ -643,6 +643,9 @@ references.
   context. These are health-related data. The choice of provider must take into account its data
   retention and reuse policy and the place of processing; a local model is the only configuration with no
   transmission.
+- **Replies by e-mail** (optional, off by default): the text of the athlete's replies to the briefing, read with `gog` in read-only mode,
+  is stored in `coach-inbox.json` (owner-only) and in the day's journal note. It is untrusted input: bounded (1 500 characters, 10 per run),
+  accepted only from configured senders, and presented to the model as data, never as instructions.
 - **Minimization**: the tools return aggregates and deviations, not the raw history; the `includeDaily`
   option is disabled by default.
 - **No health data in technical logs**: `gc` errors are reduced to stable codes, without command output.

@@ -34,6 +34,16 @@ export type CoachConfig = {
   language: "en" | "fr";
   /** Wrist skin temperature: `auto` uses it only when the watch records it (see skin.ts). */
   skinTemperature: SkinTemperatureMode;
+  /** `briefing`: read the replies to the briefing e-mail (with gog) each time a briefing is built. `off`: only what a cron stored. */
+  mailReplies: "off" | "briefing";
+  /** gog account (mailbox) that receives the replies. */
+  mailAccount: string | null;
+  /** Addresses whose replies are accepted. */
+  mailAllowedFrom: string[];
+  /** Word the replied-to subject contains. */
+  mailReplySubject: string;
+  mailLookbackDays: number;
+  gogBinary: string;
 };
 
 export const DEFAULT_ZONE_FLOORS = [50, 60, 70, 80, 90];
@@ -75,5 +85,11 @@ export function parseConfig(raw: unknown): CoachConfig {
     allowWorkoutPush: cfg.allowWorkoutPush === true,
     language: text(cfg.language)?.toLowerCase().startsWith("fr") ? "fr" : "en",
     skinTemperature: cfg.skinTemperature === "on" || cfg.skinTemperature === "off" ? cfg.skinTemperature : "auto",
+    mailReplies: cfg.mailReplies === "briefing" ? "briefing" : "off",
+    mailAccount: text(cfg.mailAccount),
+    mailAllowedFrom: Array.isArray(cfg.mailAllowedFrom) ? cfg.mailAllowedFrom.filter((value): value is string => typeof value === "string").map((value) => value.trim().toLowerCase()).filter(Boolean).slice(0, 5) : [],
+    mailReplySubject: text(cfg.mailReplySubject) ?? "Briefing",
+    mailLookbackDays: numberIn(cfg.mailLookbackDays, 1, 30) ?? 3,
+    gogBinary: text(cfg.gogBinary) ?? "gog",
   };
 }

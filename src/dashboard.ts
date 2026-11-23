@@ -151,7 +151,7 @@ footer{margin-top:16px;color:var(--muted);font-size:12px}`;
 export async function renderDashboard(deps: Deps): Promise<string> {
   const lang: Lang = deps.config.language;
   const t = TEXT[lang];
-  const briefing = await dailyBriefing(deps, { sync: false });
+  const briefing = await dailyBriefing(deps, { sync: false, replies: false });
   const context = await loadContext(deps, { sync: false });
   const build = (theme: "light" | "dark") => chartBuilders(context, { theme: THEMES[theme], lang });
   const light = build("light");

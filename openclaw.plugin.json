@@ -22,6 +22,7 @@
       "coach_workout_push",
       "coach_briefing_charts",
       "coach_briefing_email",
+      "coach_inbox_sync",
       "coach_data_status"
     ]
   },
@@ -78,6 +79,11 @@
     },
     "coach_briefing_email": {
       "optional": false,
+      "sideEffecting": true,
+      "replaySafe": true
+    },
+    "coach_inbox_sync": {
+      "optional": true,
       "sideEffecting": true,
       "replaySafe": true
     },
@@ -183,6 +189,16 @@
         "maxItems": 5,
         "description": "Lower bound of heart-rate zones 1-5 in percent of maximum heart rate. Default [50,60,70,80,90]."
       },
+      "mailReplies": {
+        "type": "string",
+        "enum": ["off", "briefing"],
+        "description": "Replies to the briefing e-mail, read with gog. briefing: read them whenever a briefing is built; off (default): only what the optional inbox cron stored."
+      },
+      "mailAccount": { "type": "string", "description": "gog account (mailbox) that receives the replies to the briefing e-mail." },
+      "mailAllowedFrom": { "type": "array", "items": { "type": "string" }, "maxItems": 5, "description": "Addresses whose replies are accepted (everything else is ignored)." },
+      "mailReplySubject": { "type": "string", "description": "Word the replied-to subject contains. Default Briefing." },
+      "mailLookbackDays": { "type": "integer", "minimum": 1, "maximum": 30, "description": "How many days back to look for replies. Default 3." },
+      "gogBinary": { "type": "string", "description": "Path to the gog binary. Default gog." },
       "skinTemperature": {
         "type": "string",
         "enum": ["auto", "on", "off"],

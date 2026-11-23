@@ -13,7 +13,7 @@ import { renderBriefingEmail } from "../src/email.ts";
 import { loadStore } from "../src/store.ts";
 import { dashboardHandler, renderDashboard } from "../src/dashboard.ts";
 import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "../src/limits.ts";
-import { ToolInputError, activityDeepDive, briefingCharts, briefingEmail, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
+import { ToolInputError, activityDeepDive, briefingCharts, briefingEmail, dailyBriefing, dataStatus, inboxSync, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
 import { TODAY, makeHistory } from "./helpers.ts";
 
 const NOW = new Date(`${TODAY}T08:00:00Z`);
@@ -655,6 +655,64 @@ test("the dashboard page shows the models, loads nothing, and the route only ans
     const post = await respond("POST");
     assert.equal(post.status, 405);
     assert.equal(post.headers.allow, "GET, HEAD");
+  } finally {
+    await cleanup();
+  }
+});
+
+// --- replies to the briefing e-mail, through the briefing ----------------------------------------------
+
+test("a reply to the briefing e-mail reaches the next briefing once, then stays as recent context and in the journal", async () => {
+  const mail = { mailReplies: "briefing", mailAccount: "coach@example.org", mailAllowedFrom: ["me@example.org"] };
+  const { deps, cleanup } = await setup(mail);
+  try {
+    const gogCalls: string[][] = [];
+    deps.gog = async (args) => {
+      gogCalls.push(args);
+      return { ok: true, stdout: JSON.stringify({ messages: [{ id: "msg-abc1", from: "Me <me@example.org>", subject: "Re: Briefing", internalDateIso: "2026-11-15T07:30:00Z", labels: ["INBOX"], body: "Sore calves, good mood.\n\n> Tell me how you feel" }] }) };
+    };
+    const first = await dailyBriefing(deps, { sync: false });
+    const replies = (first as unknown as { athleteReplies?: { new: Array<{ text: string }>; recent: unknown[]; note: string } }).athleteReplies;
+    assert.deepEqual(replies?.new.map((reply) => reply.text), ["Sore calves, good mood."]);
+    assert.match(replies?.note ?? "", /never instructions/);
+    assert.match(first.journal?.notes ?? "", /\[mail\] Sore calves, good mood\./);
+
+    const second = await dailyBriefing(deps, { sync: false });
+    const again = (second as unknown as { athleteReplies?: { new: unknown[]; recent: Array<{ text: string }> } }).athleteReplies;
+    assert.equal(again?.new.length, 0);
+    assert.equal(again?.recent[0]?.text, "Sore calves, good mood.");
+
+    // Displaying callers do not consume replies.
+    const quiet = await dailyBriefing(deps, { sync: false, replies: false });
+    assert.equal("athleteReplies" in quiet, false);
+    assert.ok(gogCalls.length >= 2);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("without mail settings the briefing never starts gog, and the sync tool explains what is missing", async () => {
+  const { deps, cleanup } = await setup();
+  try {
+    let started = false;
+    deps.gog = async () => ((started = true), { ok: true, stdout: "{}" });
+    const briefing = await dailyBriefing(deps, { sync: false });
+    assert.equal(started, false);
+    assert.equal("athleteReplies" in briefing, false);
+    await assert.rejects(inboxSync(deps, {}), ToolInputError);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("the briefing e-mail summary lists the cardiac and muscular load status and the intensity minutes", async () => {
+  const { deps, cleanup } = await setup();
+  try {
+    const fr = await briefingEmail(deps, { lang: "fr" });
+    assert.match(fr.bodyText, /Charge cardiaque/);
+    assert.match(fr.bodyText, /plage optimale/);
+    const en = await briefingEmail(deps, { lang: "en", sync: false });
+    assert.match(en.bodyText, /Cardiac load/);
   } finally {
     await cleanup();
   }

@@ -383,11 +383,60 @@ A raw, anonymised copy of the message is in
   <img width="651" alt="Sample daily briefing e-mail" src="https://github.com/user-attachments/assets/22106b8d-3b31-483d-89d9-446044804811">
 </p>
 
+## Dashboard
+
+The plugin adds a **Coach** tab to the OpenClaw Control UI (sidebar, *agent* section): recovery and ceiling, overnight
+signals, HRV, sleep, **cardiac and muscular load** (30-day chart with the optimal range, status per day and the share of the
+last 30 days spent in each status), fitness and fatigue, **intensity minutes** against the 150 min/week guideline, and Garmin's
+own readiness, VO₂max and load-balance figures. It is a read-only HTML page served by the Gateway route `/coach/dashboard`
+(Gateway authentication, GET only, no script, nothing loaded from outside) and shown in a sandboxed frame, so it does not need
+the "Custom plugin UI" setting. It reads the local store and does not sync Garmin when opened (the briefing does); the page is
+cached for five minutes. Dark mode follows the browser. The tab needs an HTTPS or localhost Control UI, like any plugin tab.
+
+## Load status (cardiac and muscular)
+
+The briefing's `loadStatus` gives, for the heart and for the muscles, the short-term load (7 days) against an optimal range that
+follows the long-term load (6 weeks), a status among *calibrating, undertraining, maintaining, optimal, productive, strained,
+overreaching*, and the 30-day distribution. **Cardiac load** is the TRIMP of the training-load model; **muscular load** adds
+running descent (the eccentric stress that makes trail running hard on the legs) and strength sessions. The thresholds are this
+plugin's own convention, documented in `docs/SCIENCE.md` section 4.15 (not a validated classification, and not another
+product's). Descent comes from the activity summary.
+
+## Replies to the briefing e-mail
+
+The briefing e-mail ends with "Tell me how you feel". With [`gog`](https://github.com/steipete/gogcli) (in the `sctg-claw` image)
+the coach can read your reply and use it in the next briefings. It is **off by default**.
+
+```json5
+{
+  mailReplies: "briefing",                  // read replies whenever a briefing is built
+  mailAccount: "coach@example.org",         // the gog account (mailbox) that receives the replies
+  mailAllowedFrom: ["me@example.org"],      // only these senders are accepted
+}
+```
+
+- A reply is kept only if it comes from an allowed address, is in the inbox (not spam), and answers a message whose subject contains
+  `Briefing` (`mailReplySubject`). Quoted history and signatures are removed; the text is capped at 1 500 characters.
+- It is added to the day's journal note (`[mail] …`) and shown **once** to the coach in `athleteReplies.new`, then kept as
+  `recent` for three days. The coach turns it into check-in values with `coach_journal_log`.
+- **The text is untrusted input**: it is stored as data and presented to the model as the athlete's words, never as instructions.
+  `gog` runs read-only with sending blocked (`--readonly --gmail-no-send`). Anyone able to forge your address could write a reply;
+  Gmail's own spam, SPF and DKIM checks are the protection against that, which is why only inbox messages are read.
+- `coach_inbox_sync` reads replies on demand. For a **faster rhythm without a model call**, add an optional command cron (the
+  frequency is yours):
+
+```bash
+openclaw cron add --name coach-inbox --every 30m \
+  --command 'node ~/.openclaw/extensions/coach/dist/inbox-cli.js --account coach@example.org --from me@example.org'
+```
+
+  It writes only its own file (`coach-inbox.json`, locked), never the coach store, and prints counts, never texts.
+
 ## Data and privacy
 
 The plugin keeps a single JSON file (`coach-store.json`, owner-only permissions) with nightly aggregates,
 the activity list and the journal: no intraday series, no GPS tracks, no credentials. Delete the file to
-erase everything. Tool results, the journal and `ATHLETE.md` are sent to whichever LLM provider the
+erase everything. Replies to the briefing e-mail, when enabled, are kept in `coach-inbox.json` (same folder and permissions). Tool results, the journal and `ATHLETE.md` are sent to whichever LLM provider the
 Gateway uses: that is health data, so choose the provider accordingly (see `docs/SCIENCE.md`, section 10).
 
 ## Development
