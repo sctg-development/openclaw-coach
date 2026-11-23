@@ -199,6 +199,7 @@ Version 1's `coach_garmin_digest` is gone: replace it with `coach_daily_briefing
 | `loadHistoryDays` | `180` | Days of activities used by the load model. |
 | `retentionDays` | `730` | Older stored data is deleted. |
 | `cacheMinutes` | `15` | Minimum delay between two fetches of recent days. |
+| `skinTemperature` | `auto` | Wrist skin temperature: `auto` uses it only when the watch records it on at least 5 of the last 30 nights (a Fenix 6 never does); `on` always uses the data that exists; `off` never. |
 | `language` | `en` | Language of the chart labels: `en` or `fr`. |
 | `allowWorkoutPush` | `false` | Allow `coach_workout_push` to write to Garmin Connect. |
 

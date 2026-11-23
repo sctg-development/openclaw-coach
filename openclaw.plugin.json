@@ -183,6 +183,11 @@
         "maxItems": 5,
         "description": "Lower bound of heart-rate zones 1-5 in percent of maximum heart rate. Default [50,60,70,80,90]."
       },
+      "skinTemperature": {
+        "type": "string",
+        "enum": ["auto", "on", "off"],
+        "description": "Wrist skin temperature in the recovery score, warnings and charts. auto (default): only when the watch records it; on: always use what exists; off: never."
+      },
       "language": {
         "type": "string",
         "enum": ["en", "fr"],

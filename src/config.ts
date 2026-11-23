@@ -3,6 +3,7 @@
 import os from "node:os";
 import path from "node:path";
 import { isValidTimezone } from "./dates.ts";
+import type { SkinTemperatureMode } from "./skin.ts";
 import type { Sex } from "./types.ts";
 
 export type GarminBackend = "auto" | "native" | "gc";
@@ -31,6 +32,8 @@ export type CoachConfig = {
   allowWorkoutPush: boolean;
   /** Language of chart labels. */
   language: "en" | "fr";
+  /** Wrist skin temperature: `auto` uses it only when the watch records it (see skin.ts). */
+  skinTemperature: SkinTemperatureMode;
 };
 
 export const DEFAULT_ZONE_FLOORS = [50, 60, 70, 80, 90];
@@ -71,5 +74,6 @@ export function parseConfig(raw: unknown): CoachConfig {
     hrZoneFloorsPctMax: floorsValid ? (floors as number[]) : DEFAULT_ZONE_FLOORS,
     allowWorkoutPush: cfg.allowWorkoutPush === true,
     language: text(cfg.language)?.toLowerCase().startsWith("fr") ? "fr" : "en",
+    skinTemperature: cfg.skinTemperature === "on" || cfg.skinTemperature === "off" ? cfg.skinTemperature : "auto",
   };
 }

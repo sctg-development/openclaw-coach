@@ -16,9 +16,11 @@ import { defaultHeadline, renderBriefingEmail, type EmailSession } from "./email
 import type { GcRunner } from "./garmin/gc.ts";
 import { garminDaySignals, hasSignal, loadBalanceSignal, maxmetSignals, normalizeActivity, normalizeSplits } from "./garmin/normalize.ts";
 import { resolveProfile } from "./profile.ts";
+import { applySkinTemperature } from "./skin.ts";
 import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { habitAssociations } from "./science/associations.ts";
 import { healthspanMarkers } from "./science/healthspan.ts";
+import { intensityMinutes } from "./science/intensity.ts";
 import { analyzeHrv, lnRmssd } from "./science/hrv.ts";
 import {
   analyzeLoad,
@@ -71,6 +73,8 @@ type Context = {
   activities: Activity[];
   loads: DailyLoad[];
   profile: Profile;
+  /** False when the watch does not record skin temperature (or the option is off): the signal is dropped everywhere. */
+  skinTemperatureActive: boolean;
 };
 
 function resolveDate(value: unknown, today: string): string {
@@ -93,7 +97,8 @@ async function loadContext(deps: Deps, options: { date?: unknown; sync?: boolean
       sync = await syncStore(store, deps.gc, config, today, now);
       await saveStore(config.dataDir, store);
     }
-    const days = daysBetweenDates(store, dateRange(addDays(date, -(config.historyDays - 1)), date));
+    const skin = applySkinTemperature(config.skinTemperature, daysBetweenDates(store, dateRange(addDays(date, -(config.historyDays - 1)), date)));
+    const days = skin.days;
     // The load series starts where the activity list is known to be complete: days
     // before that are unknown, not rest days.
     const wanted = addDays(date, -(config.loadHistoryDays - 1));
@@ -101,7 +106,7 @@ async function loadContext(deps: Deps, options: { date?: unknown; sync?: boolean
     const activities = activitiesFrom(store, loadStart, date);
     const profile = resolveProfile(config, days, activities, store.lthr?.value ?? null, date);
     const loads = loadStart <= date && store.activitiesFrom ? dailyLoads(activities, profile, loadStart, date) : [];
-    return { today, date, store, sync, days, activities, loads, profile };
+    return { today, date, store, sync, days, activities, loads, profile, skinTemperatureActive: skin.active };
   });
 }
 
@@ -162,6 +167,7 @@ function syncSummary(context: Context) {
     isToday: context.date === context.today,
     sync: context.sync ? { fetchedDays: context.sync.fetchedDays, fetchedActivities: context.sync.fetchedActivities, errors: context.sync.errors } : "not requested",
     dayErrors: context.days[context.days.length - 1]?.errors ?? {},
+    skinTemperature: { mode: context.skinTemperatureActive ? "active" : "not used (not recorded by the watch, or turned off)" },
   };
 }
 
@@ -202,6 +208,7 @@ export async function dailyBriefing(deps: Deps, params: { date?: unknown; sync?:
     hrv,
     sleep,
     earlyWarning: warning,
+    intensityMinutes: intensityMinutes(days, date),
     load: { ...load, intensity28: load.intensity28 },
     garmin: {
       ...garmin,

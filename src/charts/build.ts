@@ -102,14 +102,16 @@ export function signalsChart(input: Common & { rows: SignalRows }): Chart {
   const width = 600;
   const rowHeight = 34;
   const top = 62;
-  const height = top + SIGNAL_ORDER.length * rowHeight + 14;
+  // A watch without the sensor has no skin-temperature data at all: leave the row out rather than show "no data".
+  const order = SIGNAL_ORDER.filter((key) => key !== "skinTemp" || rows.skinTemp.value !== null || rows.skinTemp.baseline !== null);
+  const height = top + order.length * rowHeight + 14;
   const trackLeft = 118;
   const trackRight = 440;
   const x = scale(-3, 3, trackLeft, trackRight);
   let body = text(20, 28, t.signalsTitle, { size: 15, weight: 600, fill: theme.text });
   body += text(20, 46, t.signalsSubtitle, { size: 11, fill: theme.muted });
   const described: string[] = [];
-  SIGNAL_ORDER.forEach((key, index) => {
+  order.forEach((key, index) => {
     const row = rows[key];
     const cy = top + index * rowHeight + rowHeight / 2;
     body += text(20, cy, t.signals[key], { size: 13, weight: 600, fill: theme.text, baseline: "middle" });

@@ -6,7 +6,7 @@
       "name": "@sctg/openclaw-coach",
       "dependencies": {
         "@resvg/resvg-js": "2.6.2",
-        "@sctg/garmin-ts-client": "^0.3.0",
+        "@sctg/garmin-ts-client": "^0.3.2",
         "typebox": "1.4.7",
       },
       "devDependencies": {
@@ -164,7 +164,7 @@
 
     "@resvg/resvg-js-win32-x64-msvc": ["@resvg/resvg-js-win32-x64-msvc@2.6.2", "", { "os": "win32", "cpu": "x64" }, "sha512-ZXtYhtUr5SSaBrUDq7DiyjOFJqBVL/dOBN7N/qmi/pO0IgiWW/f/ue3nbvu9joWE5aAKDoIzy/CxsY0suwGosQ=="],
 
-    "@sctg/garmin-ts-client": ["@sctg/garmin-ts-client@0.3.0", "", { "bin": { "garmin-ts": "dist/cli.js" } }, "sha512-eE0g4FcfXeOetsKkMFA6EyfQKWZOBi4cCnEZrs1WNTLgkBC7rlAEg08xl0MLPU99be+ZeaPPgHdP2D2AbUQNPg=="],
+    "@sctg/garmin-ts-client": ["@sctg/garmin-ts-client@0.3.2", "", { "bin": { "garmin-ts": "dist/cli.js" } }, "sha512-eqz2maJNElgPn7+thVyekm4gI5PLn8hiCRQz9pHjcq67OMaerwlUpXNkIsGeL64SBTLW5YhK8km25ujjGpTXZQ=="],
 
     "@sec-ant/readable-stream": ["@sec-ant/readable-stream@0.4.1", "", {}, "sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg=="],
 

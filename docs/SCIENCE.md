@@ -394,6 +394,17 @@ Table of markers tracked by the watch, each compared with a published benchmark,
 Limitations: population associations, not individual predictions or causal relationships. The watch's
 VO2max is an estimate; Garmin's "fitness age" is not a validated biological age.
 
+### 4.14 Intensity minutes — `intensity-minutes` 1.0.0
+
+The weekly total of Garmin's intensity minutes (moderate minutes + 2 × vigorous minutes), reported over the 7 days ending
+on the assessed day, the week so far (Monday to today) and the four previous calendar weeks, against the 150-minute weekly
+minimum of the WHO 2020 guidelines [bull2020] and of the US Physical Activity Guidelines [piercy2018] (adopted by the
+American Heart Association): 150 to 300 minutes of moderate activity, or 75 to 150 vigorous, or an equivalent mix.
+
+- The minutes are Garmin's own per-day figures (heart-rate and movement based), so daily life counts as well as workouts.
+- A day with a missing value is unknown, not zero. A 7-day total is reported only when at least 5 days have data.
+- Descriptive only: the guideline is a population minimum for health, not a training target for an athlete.
+
 ### 4.13 Charts (presentation only)
 
 `coach_briefing_charts` draws images of results already computed by the models above: recovery gauge (bands at
@@ -707,6 +718,7 @@ verified in this way.
 
 **Long-term health**
 
+- [piercy2018] Piercy KL, Troiano RP, Ballard RM, et al. The Physical Activity Guidelines for Americans. *JAMA*. 2018;320(19):2020-2028. doi:10.1001/jama.2018.14854
 - [bull2020] Bull FC, Al-Ansari SS, Biddle S, et al. World Health Organization 2020 guidelines on physical activity and sedentary behaviour. *Br J Sports Med*. 2020;54:1451-1462. doi:10.1136/bjsports-2020-102955
 - [kodama2009] Kodama S, Saito K, Tanaka S, et al. Cardiorespiratory fitness as a quantitative predictor of all-cause mortality and cardiovascular events in healthy men and women: a meta-analysis. *JAMA*. 2009;301:2024-2035. doi:10.1001/jama.2009.681
 - [levine2018] Levine ME, Lu AT, Quach A, et al. An epigenetic biomarker of aging for lifespan and healthspan. *Aging*. 2018;10:573-591. doi:10.18632/aging.101414
