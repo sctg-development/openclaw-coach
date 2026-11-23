@@ -73,7 +73,8 @@ export type LoadStatusReport = {
   } | null;
   /** Days and share of the last 30 days spent in each status (statuses with no day are omitted). */
   distribution: Array<{ status: LoadStatus; days: number; pct: number }>;
-  daily: Array<{ date: string; value: number; status: LoadStatus }>;
+  /** One entry per day: the short-term load, the chronic load, the optimal range around it and the status. */
+  daily: Array<{ date: string; value: number; chronic: number; low: number; high: number; status: LoadStatus }>;
   notes: string[];
 };
 
@@ -83,7 +84,7 @@ export function loadStatusReport(loads: readonly { date: string; load: number }[
   const daily: LoadStatusReport["daily"] = curve.map((point, index) => {
     const ratio = point.ctl > 0 ? point.atl / point.ctl : null;
     const ramp = index >= 7 ? point.ctl - (curve[index - 7]?.ctl ?? point.ctl) : null;
-    return { date: point.date, value: round(point.atl, 0), status: statusOf(ratio, ramp, index + 1) };
+    return { date: point.date, value: round(point.atl, 0), chronic: round(point.ctl, 0), low: round(RANGE_LOW * point.ctl, 0), high: round(RANGE_HIGH * point.ctl, 0), status: statusOf(ratio, ramp, index + 1) };
   });
   const last = curve[curve.length - 1];
   const window = daily.slice(-DISTRIBUTION_DAYS);

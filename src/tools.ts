@@ -6,10 +6,10 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { ceilingLadder, hrvChart, loadChart, recoveryGauge, signalsChart, sleepChart, type Chart, type HrvPoint, type SleepPoint } from "./charts/build.ts";
+import { ceilingLadder, hrvChart, loadChart, loadStatusChart, recoveryGauge, signalsChart, sleepChart, type Chart, type HrvPoint, type SleepPoint } from "./charts/build.ts";
 import type { Lang } from "./charts/labels.ts";
 import { renderPng } from "./charts/render.ts";
-import { THEMES, type ThemeName } from "./charts/svg.ts";
+import { THEMES, type Theme, type ThemeName } from "./charts/svg.ts";
 import type { CoachConfig } from "./config.ts";
 import { addDays, dateRange, isIsoDate, todayIn, weekStart } from "./dates.ts";
 import { defaultHeadline, renderBriefingEmail, type EmailSession } from "./email.ts";
@@ -66,7 +66,7 @@ function exclusive<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
-type Context = {
+export type Context = {
   today: string;
   date: string;
   store: StoreData;
@@ -87,7 +87,7 @@ function resolveDate(value: unknown, today: string): string {
   return value;
 }
 
-async function loadContext(deps: Deps, options: { date?: unknown; sync?: boolean }): Promise<Context> {
+export async function loadContext(deps: Deps, options: { date?: unknown; sync?: boolean }): Promise<Context> {
   const { config } = deps;
   const now = deps.now?.() ?? new Date();
   const today = todayIn(config.timezone, now);
@@ -728,7 +728,7 @@ export async function dataStatus(deps: Deps, params: { sync?: boolean }) {
 
 // --- coach_briefing_charts ------------------------------------------------------------------------
 
-export const CHART_IDS = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights"] as const;
+export const CHART_IDS = ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights", "cardiac_load", "muscular_load"] as const;
 export type ChartId = (typeof CHART_IDS)[number];
 
 const CHART_KEEP_DAYS = 14;
@@ -747,20 +747,8 @@ async function pruneCharts(root: string, today: string): Promise<void> {
   }
 }
 
-export async function briefingCharts(
-  deps: Deps,
-  params: { date?: unknown; sync?: boolean; charts?: string[]; lang?: string; theme?: string },
-) {
-  const requested = params.charts?.length ? params.charts : [...CHART_IDS];
-  for (const id of requested) {
-    if (!(CHART_IDS as readonly string[]).includes(id)) throw new ToolInputError(`Unknown chart '${id}'. Available: ${CHART_IDS.join(", ")}.`);
-  }
-  if (params.theme !== undefined && params.theme !== "light" && params.theme !== "dark") throw new ToolInputError("theme must be 'light' or 'dark'.");
-  if (params.lang !== undefined && params.lang !== "en" && params.lang !== "fr") throw new ToolInputError("lang must be 'en' or 'fr'.");
-  const lang: Lang = (params.lang as Lang | undefined) ?? deps.config.language;
-  const theme = THEMES[(params.theme as ThemeName | undefined) ?? "light"];
-
-  const context = await loadContext(deps, params);
+/** Chart builders for one loaded context: each returns a chart, or the reason there is nothing to draw. */
+export function chartBuilders(context: Context, common: { theme: Theme; lang: Lang }): Record<ChartId, () => Chart | string> {
   const { days, activities, loads, profile, date, store } = context;
   const hrv = analyzeHrv(days);
   const sleep = analyzeSleep(days, profile);
@@ -769,8 +757,7 @@ export async function briefingCharts(
   const load = analyzeLoad(loads, activities, profile);
   const readiness = decideReadiness({ hrv, recovery, warning, sleep, load, journal: store.journal[date] ?? null });
 
-  const common = { theme, lang };
-  const builders: Record<ChartId, () => Chart | string> = {
+  return {
     recovery_gauge: () => recoveryGauge({ ...common, score: recovery.score, band: recovery.band }),
     ceiling: () => ceilingLadder({ ...common, ceiling: readiness.ceiling, suggestedLoad: readiness.suggestedLoad }),
     signals: () => {
@@ -805,7 +792,34 @@ export async function briefingCharts(
       if (!nights.some((night) => night.hours !== null)) return "No sleep recorded in the last 14 nights.";
       return sleepChart({ ...common, nights });
     },
+    cardiac_load: () => {
+      const report = loadStatuses(context).cardiac;
+      return report.daily.length < 7 ? "Fewer than 7 days of load history." : loadStatusChart({ ...common, kind: "cardiac", daily: report.daily.slice(-30) });
+    },
+    muscular_load: () => {
+      const report = loadStatuses(context).muscular;
+      return report.daily.length < 7 || report.daily.every((day) => day.value === 0) ? "No muscular load recorded in the load history window." : loadStatusChart({ ...common, kind: "muscular", daily: report.daily.slice(-30) });
+    },
   };
+
+}
+
+export async function briefingCharts(
+  deps: Deps,
+  params: { date?: unknown; sync?: boolean; charts?: string[]; lang?: string; theme?: string },
+) {
+  const requested = params.charts?.length ? params.charts : [...CHART_IDS];
+  for (const id of requested) {
+    if (!(CHART_IDS as readonly string[]).includes(id)) throw new ToolInputError(`Unknown chart '${id}'. Available: ${CHART_IDS.join(", ")}.`);
+  }
+  if (params.theme !== undefined && params.theme !== "light" && params.theme !== "dark") throw new ToolInputError("theme must be 'light' or 'dark'.");
+  if (params.lang !== undefined && params.lang !== "en" && params.lang !== "fr") throw new ToolInputError("lang must be 'en' or 'fr'.");
+  const lang: Lang = (params.lang as Lang | undefined) ?? deps.config.language;
+  const theme = THEMES[(params.theme as ThemeName | undefined) ?? "light"];
+
+  const context = await loadContext(deps, params);
+  const { date } = context;
+  const builders = chartBuilders(context, { theme, lang });
 
   const folder = path.join(deps.config.dataDir, "charts");
   const directory = path.join(folder, date);

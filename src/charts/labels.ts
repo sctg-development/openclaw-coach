@@ -18,6 +18,7 @@ type Strings = {
   trend7: string;
   normalRange: string;
   loadTitle: string;
+  loadStatus: { cardiac: string; muscular: string; range: string; value: string; statuses: Record<"calibrating" | "undertraining" | "maintaining" | "optimal" | "productive" | "strained" | "overreaching", string> };
   fitness: string;
   fatigue: string;
   form: string;
@@ -54,6 +55,13 @@ export const LABELS: Record<Lang, Strings> = {
     trend7: "7-day mean",
     normalRange: "Normal range",
     loadTitle: "Fitness, fatigue and form",
+    loadStatus: {
+      cardiac: "Cardiac load",
+      muscular: "Muscular load",
+      range: "Optimal range",
+      value: "7-day load",
+      statuses: { calibrating: "Calibrating", undertraining: "Undertraining", maintaining: "Maintaining", optimal: "Optimal", productive: "Productive", strained: "Strained", overreaching: "Overreaching" },
+    },
     fitness: "Fitness (CTL)",
     fatigue: "Fatigue (ATL)",
     form: "Form (TSB)",
@@ -87,6 +95,13 @@ export const LABELS: Record<Lang, Strings> = {
     trend7: "Moyenne 7 j",
     normalRange: "Plage normale",
     loadTitle: "Forme physique, fatigue et fraîcheur",
+    loadStatus: {
+      cardiac: "Charge cardiaque",
+      muscular: "Charge musculaire",
+      range: "Plage optimale",
+      value: "Charge sur 7 jours",
+      statuses: { calibrating: "Étalonnage", undertraining: "Manque d'entraînement", maintaining: "Maintien", optimal: "Optimal", productive: "Productif", strained: "Fatigue", overreaching: "Surentraînement" },
+    },
     fitness: "Forme (CTL)",
     fatigue: "Fatigue (ATL)",
     form: "Fraîcheur (TSB)",

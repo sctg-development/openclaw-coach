@@ -11,6 +11,7 @@ import { createGarminRunner } from "../src/garmin/backend.ts";
 import { isNativeCommand, nativeRunner, type NativeGarmin } from "../src/garmin/native.ts";
 import { renderBriefingEmail } from "../src/email.ts";
 import { loadStore } from "../src/store.ts";
+import { dashboardHandler, renderDashboard } from "../src/dashboard.ts";
 import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "../src/limits.ts";
 import { ToolInputError, activityDeepDive, briefingCharts, briefingEmail, dailyBriefing, dataStatus, journalInsights, journalLog, strengthAnalysis, trainingLoad, trends, workoutPush, zonesAndPaces, type Deps } from "../src/tools.ts";
 import { TODAY, makeHistory } from "./helpers.ts";
@@ -369,7 +370,7 @@ test("briefing charts are rendered as PNG files at twice their display size, wit
   const { deps, dataDir, cleanup } = await setup();
   try {
     const result = await briefingCharts(deps, { lang: "fr" });
-    assert.deepEqual(result.charts.map((chart) => chart.id), ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights"]);
+    assert.deepEqual(result.charts.map((chart) => chart.id), ["recovery_gauge", "ceiling", "signals", "hrv_trend", "load_curve", "sleep_nights", "cardiac_load", "muscular_load"]);
     assert.deepEqual(result.skipped, []);
     for (const chart of result.charts) {
       assert.ok(chart.path.startsWith(path.join(dataDir, "charts", TODAY)));
@@ -623,4 +624,38 @@ test("the native runner serves load balance and VO2 max history, and reports uns
   const result = await nativeRunner(old)(["metrics", "load-balance", "2026-11-17"]);
   assert.equal(result.ok, false);
   assert.equal((result as { code: string }).code, "unsupported");
+});
+
+// --- dashboard ---------------------------------------------------------------------------------------
+
+test("the dashboard page shows the models, loads nothing, and the route only answers GET and HEAD", async () => {
+  const { deps, cleanup } = await setup();
+  try {
+    const html = await renderDashboard(deps);
+    if (process.env.COACH_DASHBOARD_PREVIEW) await writeFile(process.env.COACH_DASHBOARD_PREVIEW, html);
+    assert.ok(html.startsWith("<!doctype html>"));
+    for (const word of ["Cardiac load", "Muscular load", "Intensity minutes", "Recovery"]) assert.ok(html.includes(word), word);
+    assert.ok(!/<script/i.test(html), "no script");
+    assert.ok(!/(src|href)="https?:/i.test(html), "no external resource");
+
+    const respond = async (method: string) => {
+      const headers: Record<string, string> = {};
+      let body: string | undefined;
+      const res = { statusCode: 0, setHeader: (k: string, v: string) => void (headers[k.toLowerCase()] = v), end: (chunk?: string) => void (body = chunk) };
+      const handled = await dashboardHandler(deps)({ method } as never, res as never);
+      return { handled, status: res.statusCode, headers, body };
+    };
+    const get = await respond("GET");
+    assert.equal(get.status, 200);
+    assert.ok(get.headers["content-security-policy"]?.includes("default-src 'none'"));
+    assert.ok(get.body?.includes("Cardiac load"));
+    const head = await respond("HEAD");
+    assert.equal(head.status, 200);
+    assert.equal(head.body, undefined);
+    const post = await respond("POST");
+    assert.equal(post.status, 405);
+    assert.equal(post.headers.allow, "GET, HEAD");
+  } finally {
+    await cleanup();
+  }
 });

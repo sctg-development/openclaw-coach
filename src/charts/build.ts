@@ -4,6 +4,7 @@
  * Logical sizes are in CSS pixels; the PNG is rendered at twice that for sharp screens.
  */
 
+import type { LoadStatus, LoadStatusReport } from "../science/loadstatus.ts";
 import { LABELS, shortDate, type Lang } from "./labels.ts";
 import { FONT, esc, gaugeArc, linePath, n, niceTicks, polar, scale, svgDocument, text, type Theme } from "./svg.ts";
 
@@ -293,3 +294,57 @@ export function sleepChart(input: Common & { nights: SleepPoint[] }): Chart {
 }
 
 export { FONT, esc };
+
+// --- Cardiac / muscular load status ---------------------------------------------------------------
+
+/** Dot colour of each status (the same hues in both themes: they must stay recognisable). */
+export const STATUS_COLORS: Record<LoadStatus, string> = {
+  calibrating: "#9ca3af",
+  undertraining: "#f59e0b",
+  maintaining: "#8b5cf6",
+  optimal: "#0ea5e9",
+  productive: "#16a34a",
+  strained: "#ec4899",
+  overreaching: "#be123c",
+};
+
+/**
+ * Short-term load over the last days against its optimal range (a band that follows the chronic load), one dot per
+ * day coloured by status. Draws what the load-status model computed; nothing is recomputed here.
+ */
+export function loadStatusChart(input: Common & { kind: "cardiac" | "muscular"; daily: LoadStatusReport["daily"] }): Chart {
+  const { theme, lang, kind, daily } = input;
+  const t = LABELS[lang];
+  const width = 600;
+  const height = 300;
+  const plot = { left: 48, right: 566, top: 64, bottom: 244 };
+  const title = t.loadStatus[kind];
+  const x = scale(0, Math.max(daily.length - 1, 1), plot.left, plot.right);
+  const max = Math.max(...daily.flatMap((d) => [d.value, d.high]), 10) * 1.1;
+  const y = scale(0, max, plot.bottom, plot.top);
+  let body = text(20, 28, title, { size: 15, weight: 600, fill: theme.text });
+  body += text(20, 46, `${t.loadStatus.value} · ${t.loadStatus.range}`, { size: 11, fill: theme.muted });
+  for (const tick of niceTicks(0, max, 4)) {
+    body += `<line x1="${plot.left}" y1="${n(y(tick))}" x2="${plot.right}" y2="${n(y(tick))}" stroke="${theme.grid}" stroke-width="1"/>`;
+    body += text(plot.left - 8, y(tick), String(Math.round(tick)), { size: 11, anchor: "end", fill: theme.muted, baseline: "middle" });
+  }
+  if (daily.length > 1) {
+    const upper = daily.map((d, i) => `${i ? "L" : "M"}${n(x(i))} ${n(y(d.high))}`).join("");
+    const lower = [...daily].reverse().map((d, i) => `L${n(x(daily.length - 1 - i))} ${n(y(d.low))}`).join("");
+    body += `<path d="${upper}${lower}Z" fill="${theme.good}" fill-opacity="0.16"/>`;
+    body += `<path d="${linePath(daily.map((d, i) => ({ x: x(i), y: y(d.value) })))}" fill="none" stroke="${theme.muted}" stroke-width="1.5" stroke-linejoin="round"/>`;
+  }
+  daily.forEach((d, i) => {
+    body += `<circle cx="${n(x(i))}" cy="${n(y(d.value))}" r="4" fill="${theme.background}" stroke="${STATUS_COLORS[d.status]}" stroke-width="2.5"/>`;
+  });
+  const labelEvery = Math.max(1, Math.round(daily.length / 6));
+  daily.forEach((d, i) => {
+    if ((daily.length - 1 - i) % labelEvery === 0) body += text(x(i), plot.bottom + 18, shortDate(d.date, lang), { size: 11, anchor: "middle", fill: theme.muted });
+  });
+  const last = daily[daily.length - 1];
+  const alt = last ? `${title}: ${last.value}, ${t.loadStatus.statuses[last.status]} (${t.loadStatus.range} ${last.low}-${last.high}).` : `${title}: ${t.noData}.`;
+  if (last) {
+    body += text(plot.right, 46, `${last.value}  ·  ${t.loadStatus.statuses[last.status]}`, { size: 13, weight: 600, anchor: "end", fill: STATUS_COLORS[last.status] });
+  }
+  return { svg: svgDocument(width, height, theme, title, alt, body), width, height, alt };
+}

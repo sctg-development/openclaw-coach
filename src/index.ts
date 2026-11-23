@@ -1,6 +1,7 @@
 import { Type, type TSchema } from "typebox";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { parseConfig } from "./config.ts";
+import { dashboardHandler } from "./dashboard.ts";
 import { MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { createGarminRunner } from "./garmin/backend.ts";
 import {
@@ -236,6 +237,19 @@ export default definePluginEntry({
   register(api) {
     const config = parseConfig(api.pluginConfig);
     const deps: Deps = { config, gc: createGarminRunner(config) };
+
+    // Dashboard tab: a read-only HTML page behind Gateway authentication, shown by the Control UI in a sandboxed frame.
+    api.registerHttpRoute({ path: "/coach/dashboard", auth: "gateway", match: "exact", handler: dashboardHandler(deps) });
+    api.session.controls.registerControlUiDescriptor({
+      surface: "tab",
+      id: "coach",
+      label: "Coach",
+      description: "Recovery, HRV, sleep, cardiac and muscular load, intensity minutes.",
+      icon: "heart",
+      group: "agent",
+      path: "/coach/dashboard",
+      requiredScopes: ["operator.read"],
+    });
 
     for (const tool of TOOLS) {
       api.registerTool({
