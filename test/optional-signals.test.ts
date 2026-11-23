@@ -88,3 +88,55 @@ test("missing days are unknown, not zero, and too few days give no total", () =>
   // The week so far reports what exists, however few days there are.
   assert.ok((report.weekToDate.daysWithData ?? 0) <= 7);
 });
+
+// --- load status (cardiac and muscular) -----------------------------------------------------------
+
+import { LOAD_STATUSES, loadStatusReport, statusOf } from "../src/science/loadstatus.ts";
+import { activityMuscularLoad, dailyMuscularLoads } from "../src/science/muscular.ts";
+import { dateRange } from "../src/dates.ts";
+import { makeActivity } from "./helpers.ts";
+
+const series = (count: number, valueAt: (index: number) => number) => dateRange(addDays(TODAY, -(count - 1)), TODAY).map((date, index) => ({ date, load: valueAt(index) }));
+
+test("the status follows the ratio of short-term to long-term load, and the range moves with fitness", () => {
+  assert.equal(statusOf(0.5, 0, 60), "undertraining");
+  assert.equal(statusOf(0.7, 0, 60), "maintaining");
+  assert.equal(statusOf(0.9, 0, 60), "optimal");
+  assert.equal(statusOf(1.1, 1, 60), "productive");
+  assert.equal(statusOf(1.1, -1, 60), "optimal");
+  assert.equal(statusOf(1.4, 1, 60), "strained");
+  assert.equal(statusOf(1.7, 1, 60), "overreaching");
+  assert.equal(statusOf(1.0, 0, 10), "calibrating");
+  assert.equal(statusOf(null, null, 60), "calibrating");
+});
+
+test("steady training is optimal, a sudden block pushes the load above the range, and the distribution adds up", () => {
+  const steady = loadStatusReport(series(90, () => 60), "TRIMP");
+  assert.equal(steady.today?.status, "optimal");
+  assert.equal(steady.today?.position, "within");
+  const spike = loadStatusReport(series(90, (index) => (index >= 85 ? 200 : 60)), "TRIMP");
+  assert.equal(spike.today?.position, "above");
+  assert.ok(["strained", "overreaching"].includes(spike.today?.status ?? ""));
+  assert.ok((spike.today?.optimalRange[1] ?? 0) < (spike.today?.value ?? 0));
+  const total = spike.distribution.reduce((sum, entry) => sum + entry.days, 0);
+  assert.equal(total, 30);
+  assert.ok(spike.distribution.every((entry) => (LOAD_STATUSES as readonly string[]).includes(entry.status)));
+  const short = loadStatusReport(series(10, () => 50), "TRIMP");
+  assert.equal(short.today?.status, "calibrating");
+  assert.ok(short.notes.length > 0);
+});
+
+test("muscular load counts running descent, half of it when walking, none by bike, and strength by duration", () => {
+  const run = makeActivity(TODAY, { type: "trail_running", elevLossM: 800, durationS: 7200 });
+  const hike = makeActivity(TODAY, { type: "hiking", elevLossM: 800, durationS: 7200 });
+  const bike = makeActivity(TODAY, { type: "cycling", elevLossM: 800, durationS: 7200 });
+  const gym = makeActivity(TODAY, { type: "strength_training", elevLossM: null, durationS: 2700 });
+  assert.deepEqual(activityMuscularLoad(run), { eccentric: 800, strength: 0 });
+  assert.deepEqual(activityMuscularLoad(hike), { eccentric: 400, strength: 0 });
+  assert.deepEqual(activityMuscularLoad(bike), { eccentric: 0, strength: 0 });
+  assert.equal(activityMuscularLoad(gym).strength, 67.5);
+  const days = dailyMuscularLoads([run, gym], addDays(TODAY, -2), TODAY);
+  assert.equal(days.length, 3);
+  assert.equal(days[2]?.load, 867.5);
+  assert.equal(days[0]?.load, 0);
+});

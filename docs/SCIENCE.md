@@ -405,6 +405,40 @@ American Heart Association): 150 to 300 minutes of moderate activity, or 75 to 1
 - A day with a missing value is unknown, not zero. A 7-day total is reported only when at least 5 days have data.
 - Descriptive only: the guideline is a population minimum for health, not a training target for an athlete.
 
+### 4.15 Load status, cardiac and muscular — `load-status` 1.0.0, `muscular-load` 1.0.0
+
+Reads the recent load against the athlete's own chronic load, separately for the heart and for the muscles.
+
+**Cardiac load** is the Banister TRIMP of section 4.6. **Muscular load** adds the mechanical stress that heart rate does not
+show: descent in running (1 unit per metre lost; 0.5 when hiking or walking; none by bike) and strength sessions (1.5 units
+per minute). Lengthening contractions on the way down are the main source of delayed muscle damage in trail running
+[giandolini2016, vernillo2017]. The relative weight of the two sources is a plugin convention (a 45-minute strength session
+counts about as much as 70 m of running descent), not a validated figure: only the relative size of days matters, because each
+athlete is read against their own history.
+
+For each indicator, the short-term load (ATL, 7-day time constant) is compared with the long-term load (CTL, 42-day time
+constant): `ratio = ATL / CTL`, and the optimal range is `[0.8, 1.3] × CTL`, so it follows the athlete's fitness. Seven
+statuses describe the ratio and the direction of the chronic load:
+
+| Status | Rule |
+|---|---|
+| calibrating | fewer than 28 days of history at that date |
+| undertraining | ratio < 0.6 |
+| maintaining | 0.6 ≤ ratio < 0.8 |
+| optimal | 0.8 ≤ ratio < 1.0 (and 1.0 to 1.3 when the chronic load is not rising) |
+| productive | 1.0 ≤ ratio < 1.3 and the chronic load rising over the last 7 days |
+| strained | 1.3 ≤ ratio < 1.5 |
+| overreaching | ratio ≥ 1.5 |
+
+The report also gives the number of days and the share of the last 30 days spent in each status.
+
+- This is a plugin convention built on the fitness-fatigue model [banister1991, calvert1976], not a validated classification
+  and not the proprietary one of any other product.
+- The ratio describes a progression of load. It does not predict injury [impellizzeri2020, lolli2019]; "overreaching" names a
+  load level relative to what the body is used to, never a diagnosis.
+- Descent comes from the activity summary. A finer estimate from the altitude series of the FIT file (steep descents
+  weighted more) is a planned refinement.
+
 ### 4.13 Charts (presentation only)
 
 `coach_briefing_charts` draws images of results already computed by the models above: recovery gauge (bands at
@@ -719,6 +753,8 @@ verified in this way.
 **Long-term health**
 
 - [piercy2018] Piercy KL, Troiano RP, Ballard RM, et al. The Physical Activity Guidelines for Americans. *JAMA*. 2018;320(19):2020-2028. doi:10.1001/jama.2018.14854
+- [giandolini2016] Giandolini M, Vernillo G, Samozino P, Horvais N, et al. Fatigue associated with prolonged graded running. *Eur J Appl Physiol*. 2016;116:1859-1873. doi:10.1007/s00421-016-3437-4
+- [vernillo2017] Vernillo G, Giandolini M, Edwards WB, Morin JB, Samozino P, Horvais N, et al. Biomechanics and physiology of uphill and downhill running. *Sports Med*. 2017;47:615-629. doi:10.1007/s40279-016-0605-y
 - [bull2020] Bull FC, Al-Ansari SS, Biddle S, et al. World Health Organization 2020 guidelines on physical activity and sedentary behaviour. *Br J Sports Med*. 2020;54:1451-1462. doi:10.1136/bjsports-2020-102955
 - [kodama2009] Kodama S, Saito K, Tanaka S, et al. Cardiorespiratory fitness as a quantitative predictor of all-cause mortality and cardiovascular events in healthy men and women: a meta-analysis. *JAMA*. 2009;301:2024-2035. doi:10.1001/jama.2009.681
 - [levine2018] Levine ME, Lu AT, Quach A, et al. An epigenetic biomarker of aging for lifespan and healthspan. *Aging*. 2018;10:573-591. doi:10.18632/aging.101414

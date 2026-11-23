@@ -21,6 +21,8 @@ import { MAX_DISTINCT_TAGS, MAX_TAGS_PER_ENTRY } from "./limits.ts";
 import { habitAssociations } from "./science/associations.ts";
 import { healthspanMarkers } from "./science/healthspan.ts";
 import { intensityMinutes } from "./science/intensity.ts";
+import { loadStatusReport } from "./science/loadstatus.ts";
+import { dailyMuscularLoads } from "./science/muscular.ts";
 import { analyzeHrv, lnRmssd } from "./science/hrv.ts";
 import {
   analyzeLoad,
@@ -108,6 +110,15 @@ async function loadContext(deps: Deps, options: { date?: unknown; sync?: boolean
     const loads = loadStart <= date && store.activitiesFrom ? dailyLoads(activities, profile, loadStart, date) : [];
     return { today, date, store, sync, days, activities, loads, profile, skinTemperatureActive: skin.active };
   });
+}
+
+/** Cardiac (TRIMP) and muscular (descent + strength) load statuses over the context's load window. */
+export function loadStatuses(context: Pick<Context, "loads" | "activities" | "date">) {
+  const start = context.loads[0]?.date ?? context.date;
+  return {
+    cardiac: loadStatusReport(context.loads, "TRIMP (Banister)"),
+    muscular: loadStatusReport(dailyMuscularLoads(context.activities, start, context.date), "muscular load units (descent + strength)"),
+  };
 }
 
 function profileSummary(profile: Profile) {
@@ -198,6 +209,11 @@ export async function dailyBriefing(deps: Deps, params: { date?: unknown; sync?:
   const ownDays = Object.values(store.days).filter(hasSignal).length;
   const maxmet = maxmetResult.ok ? maxmetSignals(maxmetResult.data, ownDays) : {};
 
+  // Cardiac and muscular load statuses share the load history window; the per-day series is left for the dashboard.
+  const statuses = loadStatuses(context);
+  const { daily: _cardiacDaily, ...cardiac } = statuses.cardiac;
+  const { daily: _muscularDaily, ...muscular } = statuses.muscular;
+
   const yesterday = addDays(date, -1);
   return {
     date,
@@ -209,6 +225,7 @@ export async function dailyBriefing(deps: Deps, params: { date?: unknown; sync?:
     sleep,
     earlyWarning: warning,
     intensityMinutes: intensityMinutes(days, date),
+    loadStatus: { cardiac, muscular },
     load: { ...load, intensity28: load.intensity28 },
     garmin: {
       ...garmin,
