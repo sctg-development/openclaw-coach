@@ -400,7 +400,8 @@ follows the long-term load (6 weeks), a status among *calibrating, undertraining
 overreaching*, and the 30-day distribution. **Cardiac load** is the TRIMP of the training-load model; **muscular load** adds
 running descent (the eccentric stress that makes trail running hard on the legs) and strength sessions. The thresholds are this
 plugin's own convention, documented in `docs/SCIENCE.md` section 4.15 (not a validated classification, and not another
-product's). Descent comes from the activity summary.
+product's). Descent comes from the activity summary; with the native Garmin client the plugin also reads the FIT file of recent
+running and walking sessions (5 per synchronisation at most, each once) and weights steep descents more.
 
 ## Replies to the briefing e-mail
 

@@ -3,7 +3,7 @@
 import { isIsoDate } from "../dates.ts";
 import { isNum } from "../science/stats.ts";
 import type { Split } from "../science/performance.ts";
-import type { Activity, DayRecord } from "../types.ts";
+import type { Activity, ActivityDescent, DayRecord } from "../types.ts";
 
 type Json = Record<string, unknown>;
 
@@ -71,6 +71,15 @@ export function normalizeActivity(raw: unknown): Activity | null {
     tempMinC: num(a, "minTemperature"),
     tempMaxC: num(a, "maxTemperature"),
   };
+}
+
+/** Reads the result of `activities descent <id>`; null when the payload has no usable figures. */
+export function parseDescent(payload: unknown): ActivityDescent | null {
+  const root = obj(payload);
+  const eccentric = num(root, "eccentricUnits");
+  const descent = num(root, "descentM");
+  if (eccentric === null || descent === null || eccentric < 0 || descent < 0) return null;
+  return { descentM: descent, steepDescentM: Math.max(0, num(root, "steepDescentM") ?? 0), eccentricUnits: eccentric };
 }
 
 export function normalizeActivities(payload: unknown): Activity[] {

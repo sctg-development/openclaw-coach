@@ -140,3 +140,66 @@ test("muscular load counts running descent, half of it when walking, none by bik
   assert.equal(days[2]?.load, 867.5);
   assert.equal(days[0]?.load, 0);
 });
+
+// --- descent measured from the FIT file ------------------------------------------------------------
+
+import { enrichDescents, DESCENT_PER_SYNC, type SyncReport } from "../src/sync.ts";
+import { emptyStore } from "../src/store.ts";
+import { parseDescent } from "../src/garmin/normalize.ts";
+import type { GcRunner } from "../src/garmin/gc.ts";
+
+test("a measured descent replaces the summary's metres lost in the muscular load, and weighs steep descents more", () => {
+  const summary = makeActivity(TODAY, { type: "trail_running", elevLossM: 600, durationS: 7200 });
+  const measured = { ...summary, descent: { descentM: 580, steepDescentM: 300, eccentricUnits: 800 } };
+  assert.equal(activityMuscularLoad(summary).eccentric, 600);
+  assert.equal(activityMuscularLoad(measured).eccentric, 800);
+  // A file with nothing usable (null) falls back to the summary.
+  assert.equal(activityMuscularLoad({ ...summary, descent: null }).eccentric, 600);
+  // Walking keeps its half weight on the measured value.
+  assert.equal(activityMuscularLoad({ ...measured, type: "hiking" }).eccentric, 400);
+});
+
+test("the descent payload is validated", () => {
+  assert.deepEqual(parseDescent({ descentM: 120, steepDescentM: 30, eccentricUnits: 150, extra: 1 }), { descentM: 120, steepDescentM: 30, eccentricUnits: 150 });
+  assert.equal(parseDescent(null), null);
+  assert.equal(parseDescent({ descentM: -5, eccentricUnits: 1 }), null);
+  assert.equal(parseDescent({ descentM: "x", eccentricUnits: 1 }), null);
+});
+
+test("descents are measured for a few recent running sessions per sync, newest first, once each, and stop on the first failure", async () => {
+  const store = emptyStore();
+  for (let i = 0; i < 8; i += 1) store.activities[`10${i}`] = makeActivity(addDays(TODAY, -i), { id: `10${i}`, type: "trail_running", elevLossM: 100 });
+  store.activities.bike = makeActivity(TODAY, { id: "bike", type: "cycling", elevLossM: 900 });
+  store.activities.flat = makeActivity(TODAY, { id: "flat", type: "running", elevLossM: 5 });
+  store.activities.old = makeActivity(addDays(TODAY, -400), { id: "old", type: "running", elevLossM: 300 });
+  const asked: string[] = [];
+  const gc: GcRunner = async (args) => (asked.push(args.join(" ")), { ok: true, data: { descentM: 90, steepDescentM: 10, eccentricUnits: 95 } });
+  const report: SyncReport = { fetchedDays: 0, fetchedActivities: 0, fetchedDescents: 0, errors: {}, skipped: false };
+  await enrichDescents(store, gc, addDays(TODAY, -180), report);
+  assert.equal(report.fetchedDescents, DESCENT_PER_SYNC);
+  assert.deepEqual(asked, ["100", "101", "102", "103", "104"].map((id) => `activities descent ${id}`));
+  assert.equal(store.activities["100"]?.descent?.eccentricUnits, 95);
+  assert.equal(store.activities.bike?.descent, undefined);
+  assert.equal(store.activities.flat?.descent, undefined);
+  assert.equal(store.activities.old?.descent, undefined);
+
+  // Next sync: the three remaining ones, and none is fetched twice.
+  const again: string[] = [];
+  await enrichDescents(store, async (args) => (again.push(args[2] as string), { ok: true, data: null }), addDays(TODAY, -180), report);
+  assert.deepEqual(again, ["105", "106", "107"]);
+  assert.equal(store.activities["105"]?.descent, null, "nothing usable is remembered as null");
+
+  // A failure (here: no native client) stops the step and is reported, leaving the activity to try again later.
+  const failing = emptyStore();
+  failing.activities.a = makeActivity(TODAY, { id: "a", type: "running", elevLossM: 100 });
+  failing.activities.b = makeActivity(addDays(TODAY, -1), { id: "b", type: "running", elevLossM: 100 });
+  let calls = 0;
+  const failReport: SyncReport = { fetchedDays: 0, fetchedActivities: 0, fetchedDescents: 0, errors: {}, skipped: false };
+  await enrichDescents(failing, async () => (calls += 1, { ok: false, code: "unsupported", message: "x" }), addDays(TODAY, -180), failReport);
+  assert.equal(calls, 1);
+  assert.deepEqual(failReport.errors, {}, "no native client is not an error to report");
+  const limited: SyncReport = { fetchedDays: 0, fetchedActivities: 0, fetchedDescents: 0, errors: {}, skipped: false };
+  await enrichDescents(failing, async () => ({ ok: false, code: "rate_limited", message: "x" }), addDays(TODAY, -180), limited);
+  assert.equal(limited.errors.descent, "rate_limited");
+  assert.equal(failing.activities.a?.descent, undefined);
+});

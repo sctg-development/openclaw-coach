@@ -13,7 +13,7 @@
 import type { CoachConfig } from "./config.ts";
 import { addDays, dateRange, daysBetween } from "./dates.ts";
 import type { GcRunner } from "./garmin/gc.ts";
-import { hasSignal, lthrFromPayload, normalizeActivities, parseDailyExport } from "./garmin/normalize.ts";
+import { hasSignal, lthrFromPayload, normalizeActivities, parseDailyExport, parseDescent } from "./garmin/normalize.ts";
 import { prune, type StoreData } from "./store.ts";
 
 const RANGE_CHUNK_DAYS = 28;
@@ -28,6 +28,8 @@ const LTHR_REFRESH_DAYS = 7;
 export type SyncReport = {
   fetchedDays: number;
   fetchedActivities: number;
+  /** FIT files analysed for their descent in this run. */
+  fetchedDescents: number;
   /** Stable error codes by step, e.g. { daily: "auth" }. */
   errors: Record<string, string>;
   skipped: boolean;
@@ -56,7 +58,7 @@ function needsFetch(store: StoreData, date: string, today: string, now: Date, ca
 }
 
 export async function syncStore(store: StoreData, gc: GcRunner, config: CoachConfig, today: string, now: Date = new Date()): Promise<SyncReport> {
-  const report: SyncReport = { fetchedDays: 0, fetchedActivities: 0, errors: {}, skipped: false };
+  const report: SyncReport = { fetchedDays: 0, fetchedActivities: 0, fetchedDescents: 0, errors: {}, skipped: false };
   const stamp = now.toISOString();
   const historyStart = addDays(today, -(config.historyDays - 1));
   const recentStart = addDays(today, -(DETAIL_DAYS - 1));
@@ -117,7 +119,11 @@ export async function syncStore(store: StoreData, gc: GcRunner, config: CoachCon
     const result = await gc(["activities", "--start", from < loadStart ? loadStart : from, "--end", today], { timeoutMs: RANGE_TIMEOUT_MS });
     if (result.ok) {
       const list = normalizeActivities(result.data);
-      for (const activity of list) store.activities[activity.id] = activity;
+      // A refreshed summary must not forget the descent already measured from its FIT file.
+      for (const activity of list) {
+        const kept = store.activities[activity.id]?.descent;
+        store.activities[activity.id] = kept === undefined ? activity : { ...activity, descent: kept };
+      }
       store.activitiesSyncedAt = stamp;
       if (!covered) store.activitiesFrom = loadStart;
       report.fetchedActivities = list.length;
@@ -137,9 +143,40 @@ export async function syncStore(store: StoreData, gc: GcRunner, config: CoachCon
     if (value !== null) store.lthr = { value, at: stamp };
   }
 
-  report.skipped = !stale.length && activitiesFresh;
+  await enrichDescents(store, gc, loadStart, report);
+
+  report.skipped = !stale.length && activitiesFresh && report.fetchedDescents === 0;
   prune(store, today, config.retentionDays);
   return report;
+}
+
+/** FIT files analysed per sync at most: each one is a download, and a first sync over six months would be hundreds. */
+export const DESCENT_PER_SYNC = 5;
+/** Below this many metres of descent in the summary, a session is not worth a download. */
+const DESCENT_MIN_SUMMARY_M = 20;
+const DESCENT_TYPES = /run|hik|walk/i;
+
+/**
+ * Measures the descent of recent running and walking sessions from their FIT altitude trace, newest first, a few per
+ * sync. The result (or `null` when the file has nothing usable) is kept on the activity so it is never fetched again.
+ * Only the native Garmin client can do it: with `gc` alone the first call comes back `unsupported` and the step stops.
+ */
+export async function enrichDescents(store: StoreData, gc: GcRunner, from: string, report: SyncReport): Promise<void> {
+  const todo = Object.values(store.activities)
+    .filter((activity) => activity.descent === undefined && activity.date >= from && DESCENT_TYPES.test(activity.type ?? "") && (activity.elevLossM ?? 0) >= DESCENT_MIN_SUMMARY_M)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, DESCENT_PER_SYNC);
+  for (const activity of todo) {
+    const result = await gc(["activities", "descent", activity.id], { timeoutMs: 90_000 });
+    if (!result.ok) {
+      // Try again at the next sync, and stop now. "Unsupported" (gc alone, or an older native client) is the normal
+      // situation for some setups, not a problem to report; the other codes are.
+      if (result.code !== "unsupported") report.errors.descent = result.code;
+      return;
+    }
+    activity.descent = parseDescent(result.data);
+    report.fetchedDescents += 1;
+  }
 }
 
 /** How much usable history the store holds, for the data-status tool and the briefing. */
@@ -156,6 +193,7 @@ export function coverage(store: StoreData, today: string, historyDays: number) {
     daysWithSkinTemp: count((date) => store.days[date]?.skinTempDeviationC != null),
     activities: Object.keys(store.activities).length,
     activitiesFrom: store.activitiesFrom,
+    activitiesWithMeasuredDescent: Object.values(store.activities).filter((activity) => activity.descent != null).length,
     lastSync: store.activitiesSyncedAt,
     journalEntries: Object.keys(store.journal).length,
   };

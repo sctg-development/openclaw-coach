@@ -89,7 +89,14 @@ export type Activity = {
   vo2max: number | null;
   tempMinC: number | null;
   tempMaxC: number | null;
+  /**
+   * Descent measured from the FIT file's altitude trace (native Garmin client only). `undefined`: not looked at yet;
+   * `null`: looked at, nothing usable (so it is not requested again); an object: the result.
+   */
+  descent?: ActivityDescent | null;
 };
+
+export type ActivityDescent = { descentM: number; steepDescentM: number; eccentricUnits: number };
 
 export type Sex = "male" | "female";
 

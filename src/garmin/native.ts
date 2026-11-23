@@ -13,14 +13,16 @@ export interface NativeGarmin {
   lactateThreshold(): Promise<unknown>;
   /** Lactate-threshold heart rate, FTP and VO2 max (`gc metrics anchors`). Absent in older versions of the package. */
   anchors?(): Promise<unknown>;
+  /** Descent analysis of an activity's FIT file (`activities descent <id>`). Absent before garmin-ts-client 0.4.0. */
+  descent?(id: string): Promise<unknown>;
   /** Rolling 30-day load split with Garmin's target ranges (`metrics load-balance`). Absent before garmin-ts-client 0.3.2. */
   loadBalance?(date: string): Promise<unknown>;
   /** VO2 max history with the heat/altitude acclimation block (`metrics maxmet`). Absent before garmin-ts-client 0.3.2. */
   maxmet?(start: string, end: string): Promise<unknown>;
 }
 
-export type ActivityView = "splits" | "hr-zones" | "weather" | "exercise-sets";
-const ACTIVITY_VIEWS: readonly string[] = ["get", "splits", "hr-zones", "weather", "exercise-sets"];
+export type ActivityView = "splits" | "hr-zones" | "weather" | "exercise-sets" | "descent";
+const ACTIVITY_VIEWS: readonly string[] = ["get", "splits", "hr-zones", "weather", "exercise-sets", "descent"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function flags(args: string[]): { positional: string[]; values: Map<string, string>; switches: Set<string> } {
@@ -63,7 +65,10 @@ export function nativeRunner(api: NativeGarmin): GcRunner {
       } else if (command === "activities" && positional.length > 0) {
         const [view, id] = positional;
         if (!id || !/^\d{1,20}$/.test(id)) return gcFailure("unsupported");
-        data = await api.activity(id, view === "get" ? undefined : (view as ActivityView));
+        if (view === "descent") {
+          if (!api.descent) return gcFailure("unsupported");
+          data = await api.descent(id);
+        } else data = await api.activity(id, view === "get" ? undefined : (view as ActivityView));
       } else if (command === "activities") {
         const start = values.get("--start");
         if (!start || !DATE.test(start)) return gcFailure("unsupported");
@@ -113,10 +118,11 @@ export async function loadNative(tokenFile: string | null, moduleName = "@sctg/g
   return {
     daily: (options) => call("daily", options),
     activities: (options) => call("listActivities", options),
-    activity: (id, view) => call(view === undefined ? "getActivity" : { splits: "activitySplits", "hr-zones": "activityHrZones", weather: "activityWeather", "exercise-sets": "activityExerciseSets" }[view], id),
+    activity: (id, view) => call(view === undefined ? "getActivity" : { splits: "activitySplits", "hr-zones": "activityHrZones", weather: "activityWeather", "exercise-sets": "activityExerciseSets" }[view as Exclude<ActivityView, "descent">], id),
     metric: (name, date) => call(name === "training-readiness" ? "trainingReadiness" : "trainingStatus", date),
     lactateThreshold: () => call("lactateThreshold"),
     ...(typeof mod.anchors === "function" ? { anchors: () => call("anchors") } : {}),
+    ...(typeof mod.activityDescent === "function" ? { descent: (id: string) => call("activityDescent", id) } : {}),
     ...(typeof mod.trainingLoadBalance === "function" ? { loadBalance: (date: string) => call("trainingLoadBalance", date) } : {}),
     ...(typeof mod.maxMet === "function" ? { maxmet: (start: string, end: string) => call("maxMet", start, end) } : {}),
   };

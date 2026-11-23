@@ -436,8 +436,15 @@ The report also gives the number of days and the share of the last 30 days spent
   and not the proprietary one of any other product.
 - The ratio describes a progression of load. It does not predict injury [impellizzeri2020, lolli2019]; "overreaching" names a
   load level relative to what the body is used to, never a diagnosis.
-- Descent comes from the activity summary. A finer estimate from the altitude series of the FIT file (steep descents
-  weighted more) is a planned refinement.
+- **Descent source.** By default the metres lost of the activity summary. With the native Garmin client, the plugin also downloads
+  the FIT file of recent running and walking sessions (at most 5 per synchronisation, newest first, once each) and measures the
+  descent from its altitude trace: the track is cut into steps of at least 15 m whose altitude is the mean of their samples (noise
+  averages out), steps flatter than 1 % are ignored, and each metre lost is weighted by the downhill grade, 1 up to 8 %, rising
+  linearly to 1.5 at 20 % and beyond. That weighted figure ("eccentric units") replaces the summary's metres in the muscular load.
+  The weights are a plugin convention (the direction, more eccentric stress on steeper descents, is documented [vernillo2017];
+  the exact numbers are not). Calibration on three real trail runs on a flat, undulating course gave 104, 31 and 56 m against
+  the device's 172, 33 and 50 m: the device counts every small undulation of its barometer, so it reads higher on a course full of
+  small bumps. Without the native client, or for a file with no usable altitude, the summary figure is used.
 
 ### 4.13 Charts (presentation only)
 
